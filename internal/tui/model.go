@@ -15,19 +15,22 @@ type model struct {
 	cursor     int
 	message    string
 	isError    bool
+	commanding bool // true when in command mode (/ pressed)
 	quitting   bool
 	connectTo  string // sandbox name to connect to after tea quits
 	width      int
 	height     int
-	progressCh chan sandboxProgressMsg // receives progress during create
+	progressName  string // name of sandbox being created
+	progressPhase string // current phase (read by view on tick)
 }
 
 func newModel(mgr *sandbox.Manager, cfg *config.Config) model {
 	ti := textinput.New()
-	ti.Placeholder = "/start <name> [task], /stop <name>, /connect <name>, /diff <name>, /quit"
-	ti.Focus()
+	ti.Placeholder = "start <name> [task], stop <name>, connect <name>, diff <name>, quit"
 	ti.CharLimit = 256
 	ti.Width = 80
+	// Input starts unfocused — activated by pressing /
+	ti.Blur()
 
 	return model{
 		manager: mgr,
@@ -37,5 +40,5 @@ func newModel(mgr *sandbox.Manager, cfg *config.Config) model {
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(textinput.Blink, tickCmd())
+	return tickCmd()
 }

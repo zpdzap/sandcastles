@@ -19,7 +19,12 @@ func (m model) View() string {
 	// Header
 	header := headerStyle.Width(m.width).Render("sandcastles v0.1.0")
 	sandboxes := m.manager.List()
-	stats := statsStyle.Width(m.width).Render(fmt.Sprintf("%d sandbox(es)", len(sandboxes)))
+
+	noun := "sandcastles"
+	if len(sandboxes) == 1 {
+		noun = "sandcastle"
+	}
+	stats := statsStyle.Width(m.width).Render(fmt.Sprintf("%d %s", len(sandboxes), noun))
 
 	b.WriteString(header)
 	b.WriteString("\n")
@@ -32,7 +37,7 @@ func (m model) View() string {
 
 	// Sandbox list
 	if len(sandboxes) == 0 {
-		b.WriteString(emptyStyle.Render("No sandboxes running. Use /start <name> [task] to create one."))
+		b.WriteString(emptyStyle.Render("No sandcastles running. Press / then type: start <name> [task]"))
 		b.WriteString("\n")
 	} else {
 		for i, sb := range sandboxes {
@@ -43,8 +48,12 @@ func (m model) View() string {
 
 	b.WriteString("\n")
 
-	// Hotkeys
-	b.WriteString(hotkeysStyle.Render("[↑↓] select  [enter] connect  [ctrl+c] quit"))
+	// Hotkeys — different depending on mode
+	if m.commanding {
+		b.WriteString(hotkeysStyle.Render("[enter] execute  [esc] cancel"))
+	} else {
+		b.WriteString(hotkeysStyle.Render("[↑↓] select  [enter] connect  [/] command  [q] quit"))
+	}
 	b.WriteString("\n")
 
 	// Divider
@@ -61,10 +70,12 @@ func (m model) View() string {
 		b.WriteString("\n")
 	}
 
-	// Input
-	b.WriteString("  ")
-	b.WriteString(m.input.View())
-	b.WriteString("\n")
+	// Command input — only visible in command mode
+	if m.commanding {
+		b.WriteString("  / ")
+		b.WriteString(m.input.View())
+		b.WriteString("\n")
+	}
 
 	return b.String()
 }

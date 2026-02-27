@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/zpdzap/sandcastles/internal/agent"
 )
@@ -14,30 +15,32 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.input.Width = msg.Width - 4
+		m.input.Width = msg.Width - 6 // account for "  / " prefix
 		return m, nil
 
 	case statusTickMsg:
 		m.manager.RefreshStatuses()
+		// Pick up progress updates from the background create goroutine
+		if m.progressPhase != "" {
+			m.message = fmt.Sprintf("[%s] %s", m.progressName, m.progressPhase)
+			m.isError = false
+		}
 		return m, tickCmd()
 
-	case sandboxProgressMsg:
-		m.message = fmt.Sprintf("[%s] %s", msg.name, msg.phase)
-		m.isError = false
-		return m, listenForProgress(m.progressCh)
-
 	case sandboxCreatedMsg:
+		m.progressName = ""
+		m.progressPhase = ""
 		if msg.err != nil {
 			m.message = fmt.Sprintf("Error: %v", msg.err)
 			m.isError = true
 		} else {
-			m.message = fmt.Sprintf("Created sandbox: %s", msg.name)
+			m.message = fmt.Sprintf("Created sandcastle: %s", msg.name)
 			m.isError = false
 		}
 		return m, nil
 
 	case sandboxDestroyedMsg:
-		m.message = fmt.Sprintf("Destroyed sandbox: %s", msg.name)
+		m.message = fmt.Sprintf("Destroyed sandcastle: %s", msg.name)
 		m.isError = false
 		sandboxes := m.manager.List()
 		if m.cursor >= len(sandboxes) && m.cursor > 0 {
@@ -46,21 +49,35 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
-		return m.handleKey(msg)
+		if m.commanding {
+			return m.handleCommandMode(msg)
+		}
+		return m.handleNormalMode(msg)
 	}
 
-	var cmd tea.Cmd
-	m.input, cmd = m.input.Update(msg)
-	return m, cmd
+	// Forward to input if in command mode
+	if m.commanding {
+		var cmd tea.Cmd
+		m.input, cmd = m.input.Update(msg)
+		return m, cmd
+	}
+	return m, nil
 }
 
-func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+// handleNormalMode handles keys when navigating the sandcastle list.
+func (m model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "ctrl+c":
+	case "ctrl+c", "q":
 		m.quitting = true
 		return m, tea.Quit
 
-	case "up":
+	case "/":
+		m.commanding = true
+		m.input.Focus()
+		m.input.SetValue("")
+		return m, textinput.Blink
+
+	case "up", "k":
 		sandboxes := m.manager.List()
 		if m.cursor > 0 {
 			m.cursor--
@@ -69,7 +86,7 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case "down":
+	case "down", "j":
 		sandboxes := m.manager.List()
 		if m.cursor < len(sandboxes)-1 {
 			m.cursor++
@@ -77,10 +94,6 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "enter":
-		if m.input.Value() != "" {
-			return m.processInput()
-		}
-		// Connect to selected sandbox
 		sandboxes := m.manager.List()
 		if m.cursor < len(sandboxes) {
 			m.connectTo = sandboxes[m.cursor].Name
@@ -89,96 +102,115 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	return m, nil
+}
+
+// handleCommandMode handles keys when the command input is active.
+func (m model) handleCommandMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c":
+		m.quitting = true
+		return m, tea.Quit
+
+	case "esc":
+		m.commanding = false
+		m.input.Blur()
+		m.input.SetValue("")
+		return m, nil
+
+	case "enter":
+		m.commanding = false
+		m.input.Blur()
+		return m.processInput()
+	}
+
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	return m, cmd
 }
 
 func (m model) processInput() (tea.Model, tea.Cmd) {
-	input := m.input.Value()
+	input := strings.TrimSpace(m.input.Value())
 	m.input.SetValue("")
 
-	cmd := ParseCommand(input)
-	if cmd == nil {
-		m.message = "Commands start with /. Try /start, /stop, /connect, /diff, /quit"
-		m.isError = true
+	if input == "" {
 		return m, nil
 	}
 
-	switch cmd.Name {
-	case "/start":
-		if len(cmd.Args) < 1 {
+	// Allow commands with or without the / prefix
+	if input[0] == '/' {
+		input = input[1:]
+	}
+
+	parts := strings.Fields(input)
+	if len(parts) == 0 {
+		return m, nil
+	}
+
+	switch parts[0] {
+	case "start":
+		if len(parts) < 2 {
 			m.message = "Usage: /start <name> [task description]"
 			m.isError = true
 			return m, nil
 		}
-		name := cmd.Args[0]
+		name := parts[1]
 		task := ""
-		if len(cmd.Args) > 1 {
-			task = strings.Join(cmd.Args[1:], " ")
+		if len(parts) > 2 {
+			task = strings.Join(parts[2:], " ")
 		}
+		m.progressName = name
+		m.progressPhase = "Starting..."
 		m.message = fmt.Sprintf("[%s] Starting...", name)
 		m.isError = false
 
-		// Create a progress channel for streaming build phases
-		ch := make(chan sandboxProgressMsg, 8)
-		m.progressCh = ch
-
-		createCmd := func() tea.Msg {
+		return m, func() tea.Msg {
 			progress := func(phase string) {
-				ch <- sandboxProgressMsg{name: name, phase: phase}
+				m.progressPhase = phase
 			}
 			sb, err := m.manager.Create(name, task, progress)
-			close(ch)
 			if err != nil {
 				return sandboxCreatedMsg{name: name, err: err}
 			}
-			// Try to auto-start agent (non-fatal)
-			if task != "" {
-				containerName := fmt.Sprintf("sc-%s", sb.Name)
-				if err := agent.Start(containerName, task); err != nil {
-					// swallow — user will see in the tmux session
-				}
-			}
+			// Auto-start Claude in background (non-blocking, non-fatal)
+			go agent.Start(fmt.Sprintf("sc-%s", sb.Name), task)
 			return sandboxCreatedMsg{name: name}
 		}
 
-		return m, tea.Batch(createCmd, listenForProgress(ch))
-
-	case "/stop":
-		if len(cmd.Args) < 1 {
+	case "stop":
+		if len(parts) < 2 {
 			m.message = "Usage: /stop <name>"
 			m.isError = true
 			return m, nil
 		}
-		name := cmd.Args[0]
+		name := parts[1]
 		m.manager.MarkStopping(name)
-		m.message = fmt.Sprintf("Stopping sandbox %s...", name)
+		m.message = fmt.Sprintf("Stopping sandcastle %s...", name)
 		m.isError = false
 		return m, func() tea.Msg {
 			m.manager.Destroy(name)
 			return sandboxDestroyedMsg{name: name}
 		}
 
-	case "/connect":
-		if len(cmd.Args) < 1 {
+	case "connect":
+		if len(parts) < 2 {
 			m.message = "Usage: /connect <name>"
 			m.isError = true
 			return m, nil
 		}
-		m.connectTo = cmd.Args[0]
+		m.connectTo = parts[1]
 		return m, tea.Quit
 
-	case "/diff":
-		if len(cmd.Args) < 1 {
+	case "diff":
+		if len(parts) < 2 {
 			m.message = "Usage: /diff <name>"
 			m.isError = true
 			return m, nil
 		}
-		name := cmd.Args[0]
+		name := parts[1]
 		sb, ok := m.manager.Get(name)
 		if !ok {
-			m.message = fmt.Sprintf("Sandbox %q not found", name)
+			m.message = fmt.Sprintf("Sandcastle %q not found", name)
 			m.isError = true
 			return m, nil
 		}
@@ -195,12 +227,12 @@ func (m model) processInput() (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case "/quit":
+	case "quit":
 		m.quitting = true
 		return m, tea.Quit
 
 	default:
-		m.message = fmt.Sprintf("Unknown command: %s", cmd.Name)
+		m.message = fmt.Sprintf("Unknown command: %s", parts[0])
 		m.isError = true
 		return m, nil
 	}

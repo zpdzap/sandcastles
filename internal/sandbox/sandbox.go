@@ -1,5 +1,7 @@
 package sandbox
 
+import "time"
+
 // Status represents the current state of a sandbox container.
 type Status string
 
@@ -19,5 +21,6 @@ type Sandbox struct {
 	Task         string            `json:"task"`
 	Branch       string            `json:"branch"`
 	WorktreePath string            `json:"worktree_path"`
-	Ports        map[string]string `json:"ports"` // container port → host port
+	Ports        map[string]string `json:"ports"`       // container port → host port
+	CreatedAt    time.Time         `json:"created_at"`
 }

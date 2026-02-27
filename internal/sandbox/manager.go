@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/zpdzap/sandcastles/internal/config"
 	"github.com/zpdzap/sandcastles/internal/worktree"
@@ -185,6 +187,7 @@ json.dump(d, open(p, 'w'))
 		Branch:       branch,
 		WorktreePath: wtPath,
 		Ports:        ports,
+		CreatedAt:    time.Now(),
 	}
 	m.state.Sandboxes[name] = sb
 	m.persist()
@@ -226,7 +229,7 @@ func (m *Manager) ConnectCmd(name string) *exec.Cmd {
 	return exec.Command("docker", "exec", "-it", containerName, "tmux", "attach-session", "-t", "main")
 }
 
-// List returns all sandboxes sorted by name.
+// List returns all sandboxes sorted by creation time.
 func (m *Manager) List() []*Sandbox {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -235,6 +238,9 @@ func (m *Manager) List() []*Sandbox {
 	for _, sb := range m.state.Sandboxes {
 		result = append(result, sb)
 	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].CreatedAt.Before(result[j].CreatedAt)
+	})
 	return result
 }
 
@@ -287,6 +293,10 @@ func (m *Manager) RefreshStatuses() {
 	defer m.mu.Unlock()
 
 	for name, sb := range m.state.Sandboxes {
+		// Don't overwrite transient states managed by the TUI
+		if sb.Status == StatusStopping {
+			continue
+		}
 		containerName := fmt.Sprintf("sc-%s", name)
 		status := inspectStatus(containerName)
 		if status == "" {
