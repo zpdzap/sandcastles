@@ -16,6 +16,9 @@ func Create(projectDir, name string) (string, string, error) {
 	wtPath := filepath.Join(projectDir, config.Dir, config.WorktreeDir, name)
 	branch := fmt.Sprintf("sandcastle/%s", name)
 
+	// Delete stale branch if it exists (left over from a previous unclean destroy)
+	exec.Command("git", "-C", projectDir, "branch", "-D", branch).Run()
+
 	cmd := exec.Command("git", "worktree", "add", wtPath, "-b", branch)
 	cmd.Dir = projectDir
 	out, err := cmd.CombinedOutput()
