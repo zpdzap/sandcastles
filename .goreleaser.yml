@@ -1,0 +1,36 @@
+version: 2
+
+builds:
+  - main: ./cmd/sc
+    binary: sc
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+
+brews:
+  - repository:
+      owner: zpdzap
+      name: homebrew-tap
+    homepage: https://github.com/zpdzap/sandcastles
+    description: Orchestrate AI coding agents in isolated Docker containers
+    install: |
+      bin.install "sc"
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
