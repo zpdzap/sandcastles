@@ -118,7 +118,7 @@ func writeDockerfile(projectDir string, cfg *config.Config) error {
 			}
 		}
 		if !hasDocker {
-			pkgs = append(pkgs, "docker.io")
+			pkgs = append(pkgs, "docker.io", "docker-compose-plugin")
 		}
 	}
 	packages := strings.Join(pkgs, " ")
