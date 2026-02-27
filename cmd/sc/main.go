@@ -118,7 +118,7 @@ func writeDockerfile(projectDir string, cfg *config.Config) error {
 			}
 		}
 		if !hasDocker {
-			pkgs = append(pkgs, "docker.io", "docker-compose-plugin")
+			pkgs = append(pkgs, "docker.io")
 		}
 	}
 	packages := strings.Join(pkgs, " ")
@@ -128,6 +128,17 @@ func writeDockerfile(projectDir string, cfg *config.Config) error {
 		userGroups = "sudo,docker"
 	}
 
+	dockerCompose := ""
+	if cfg.Defaults.DockerSocket {
+		dockerCompose = `
+# Install Docker Compose v2 plugin
+RUN mkdir -p /usr/local/lib/docker/cli-plugins && \
+    curl -SL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-$(uname -m)" \
+    -o /usr/local/lib/docker/cli-plugins/docker-compose && \
+    chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+`
+	}
+
 	content := fmt.Sprintf(`FROM %s
 
 RUN apt-get update && apt-get install -y \
@@ -135,7 +146,7 @@ RUN apt-get update && apt-get install -y \
     %s \
     sudo \
     && rm -rf /var/lib/apt/lists/*
-
+%s
 RUN npm install -g @anthropic-ai/claude-code
 
 # Non-root user (Claude Code refuses --dangerously-skip-permissions as root)
@@ -153,7 +164,7 @@ RUN echo 'set -g mouse on' > ~/.tmux.conf && \
     echo 'set -g status-right " %%H:%%M "' >> ~/.tmux.conf
 
 CMD ["sleep", "infinity"]
-`, cfg.Image.Base, packages, userGroups)
+`, cfg.Image.Base, packages, dockerCompose, userGroups)
 
 	path := filepath.Join(projectDir, config.Dir, "Dockerfile")
 	return os.WriteFile(path, []byte(content), 0o644)
