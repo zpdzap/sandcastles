@@ -20,11 +20,11 @@ func Detect(projectDir string) Detection {
 		packages []string
 		ports    []int
 	}{
-		{"go.mod", "go", []string{"golang-go", "git", "curl"}, []int{8080}},
-		{"package.json", "node", []string{"nodejs", "npm", "git", "curl"}, []int{3000}},
-		{"requirements.txt", "python", []string{"python3", "python3-pip", "git", "curl"}, []int{8000}},
-		{"Cargo.toml", "rust", []string{"rustc", "cargo", "git", "curl"}, []int{8080}},
-		{"pyproject.toml", "python", []string{"python3", "python3-pip", "git", "curl"}, []int{8000}},
+		{"go.mod", "go", []string{"golang-go", "git", "curl", "make", "lsof"}, []int{8080}},
+		{"package.json", "node", []string{"nodejs", "npm", "git", "curl", "make", "lsof"}, []int{3000}},
+		{"requirements.txt", "python", []string{"python3", "python3-pip", "git", "curl", "make", "lsof"}, []int{8000}},
+		{"Cargo.toml", "rust", []string{"rustc", "cargo", "git", "curl", "make", "lsof"}, []int{8080}},
+		{"pyproject.toml", "python", []string{"python3", "python3-pip", "git", "curl", "make", "lsof"}, []int{8000}},
 	}
 
 	var det Detection
