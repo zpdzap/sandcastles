@@ -96,17 +96,26 @@ func initCmd() *cobra.Command {
 }
 
 func writeDockerfile(projectDir string, cfg *config.Config) error {
-	// Ensure npm is always available (needed for Claude Code)
-	pkgs := cfg.Image.Packages
-	hasNpm := false
-	for _, p := range pkgs {
-		if p == "npm" {
-			hasNpm = true
-			break
+	// Remove nodejs/npm from apt packages — we install Node via NodeSource
+	// to get a modern version (Ubuntu's nodejs is too old for most tools)
+	var pkgs []string
+	for _, p := range cfg.Image.Packages {
+		if p != "nodejs" && p != "npm" {
+			pkgs = append(pkgs, p)
 		}
 	}
-	if !hasNpm {
-		pkgs = append(pkgs, "npm")
+	// Ensure ca-certificates and gnupg are present (needed for NodeSource)
+	for _, needed := range []string{"ca-certificates", "gnupg"} {
+		found := false
+		for _, p := range pkgs {
+			if p == needed {
+				found = true
+				break
+			}
+		}
+		if !found {
+			pkgs = append(pkgs, needed)
+		}
 	}
 	// Docker CLI for docker socket support
 	if cfg.Defaults.DockerSocket {
@@ -149,6 +158,11 @@ RUN apt-get update && apt-get install -y \
     %s \
     sudo \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Node.js 22 from NodeSource (Ubuntu's nodejs is too old)
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+    apt-get install -y nodejs && \
+    rm -rf /var/lib/apt/lists/*
 %s
 RUN npm install -g @anthropic-ai/claude-code
 
