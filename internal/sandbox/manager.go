@@ -32,40 +32,46 @@ func NewManager(projectDir string, cfg *config.Config) *Manager {
 	}
 }
 
+// ProgressFunc is called with status updates during sandbox creation.
+type ProgressFunc func(phase string)
+
 // Create spins up a new sandbox: creates a worktree, builds the image, starts a container.
-func (m *Manager) Create(name, task string) (*Sandbox, error) {
+// If progress is non-nil, it's called with phase updates.
+func (m *Manager) Create(name, task string, progress ProgressFunc) (*Sandbox, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	report := func(phase string) {
+		if progress != nil {
+			progress(phase)
+		}
+	}
 
 	if _, exists := m.state.Sandboxes[name]; exists {
 		return nil, fmt.Errorf("sandbox %q already exists", name)
 	}
 
 	// Create git worktree
+	report("Creating worktree...")
 	wtPath, branch, err := worktree.Create(m.projectDir, name)
 	if err != nil {
 		return nil, fmt.Errorf("creating worktree: %w", err)
 	}
 
 	// Build the Docker image
+	report("Building image (may take a minute on first run)...")
 	if err := m.buildImage(); err != nil {
 		worktree.Remove(m.projectDir, name)
 		return nil, fmt.Errorf("building image: %w", err)
 	}
 
-	// Build docker run args
+	// Start container
+	report("Starting container...")
 	containerName := fmt.Sprintf("sc-%s", name)
 	args := []string{
 		"run", "-d",
 		"--name", containerName,
 		"-v", fmt.Sprintf("%s:/workspace", wtPath),
-	}
-
-	// Mount claude config read-only
-	home, _ := os.UserHomeDir()
-	claudeDir := home + "/.claude"
-	if _, err := os.Stat(claudeDir); err == nil {
-		args = append(args, "-v", fmt.Sprintf("%s:/root/.claude:ro", claudeDir))
 	}
 
 	// Port mappings
@@ -100,7 +106,68 @@ func (m *Manager) Create(name, task string) (*Sandbox, error) {
 		containerID = containerID[:12]
 	}
 
+	// Copy claude config files into container (writable, owned by sandcastle user)
+	report("Configuring Claude Code...")
+	home, _ := os.UserHomeDir()
+
+	// Files inside ~/.claude/
+	claudeDirFiles := []string{
+		"settings.json",
+		".credentials.json",
+	}
+	// Ensure .claude dir exists in container
+	exec.Command("docker", "exec", containerName, "mkdir", "-p", "/home/sandcastle/.claude").Run()
+	for _, f := range claudeDirFiles {
+		hostPath := home + "/.claude/" + f
+		containerPath := "/home/sandcastle/.claude/" + f
+		if _, err := os.Stat(hostPath); err == nil {
+			exec.Command("docker", "cp", hostPath, containerName+":"+containerPath).Run()
+			exec.Command("docker", "exec", "--user", "root", containerName,
+				"chown", "sandcastle:sandcastle", containerPath).Run()
+		}
+	}
+
+	// ~/.claude.json (preferences — lives at home root, not inside .claude/)
+	// Copy it, then patch to pre-trust /workspace and mark onboarding complete
+	claudeJSON := home + "/.claude.json"
+	if _, err := os.Stat(claudeJSON); err == nil {
+		exec.Command("docker", "cp", claudeJSON, containerName+":/home/sandcastle/.claude.json").Run()
+		exec.Command("docker", "exec", "--user", "root", containerName,
+			"chown", "sandcastle:sandcastle", "/home/sandcastle/.claude.json").Run()
+	}
+	// Patch .claude.json to pre-trust /workspace and skip onboarding
+	patchScript := `python3 -c "
+import json, os
+p = '/home/sandcastle/.claude.json'
+try:
+    d = json.load(open(p))
+except:
+    d = {}
+d['hasCompletedOnboarding'] = True
+d.setdefault('projects', {})['/workspace'] = {
+    'allowedTools': [],
+    'hasTrustDialogAccepted': True,
+    'hasCompletedProjectOnboarding': True,
+}
+json.dump(d, open(p, 'w'))
+"`
+	exec.Command("docker", "exec", containerName, "bash", "-c", patchScript).Run()
+
+	// Patch settings.json to default to bypass permissions (no interactive confirmation)
+	settingsPatch := `python3 -c "
+import json
+p = '/home/sandcastle/.claude/settings.json'
+try:
+    d = json.load(open(p))
+except:
+    d = {}
+d['defaultMode'] = 'bypassPermissions'
+json.dump(d, open(p, 'w'))
+"`
+	exec.Command("docker", "exec", containerName, "bash", "-c", settingsPatch).Run()
+
 	// Start tmux session inside container
+	report("Starting tmux session...")
 	tmuxCmd := exec.Command("docker", "exec", "-d", containerName, "tmux", "new-session", "-d", "-s", "main")
 	if err := tmuxCmd.Run(); err != nil {
 		// Non-fatal — container is still usable
@@ -125,19 +192,31 @@ func (m *Manager) Create(name, task string) (*Sandbox, error) {
 	return sb, nil
 }
 
-// Destroy stops and removes a sandbox container and its worktree.
-func (m *Manager) Destroy(name string) error {
+// MarkStopping sets a sandbox to "stopping" status so the TUI shows feedback immediately.
+func (m *Manager) MarkStopping(name string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	if sb, ok := m.state.Sandboxes[name]; ok {
+		sb.Status = StatusStopping
+	}
+}
+
+// Destroy stops and removes a sandbox container and its worktree.
+func (m *Manager) Destroy(name string) error {
 	containerName := fmt.Sprintf("sc-%s", name)
+
+	// Slow Docker operations — run WITHOUT holding the lock so TUI doesn't freeze
 	exec.Command("docker", "stop", containerName).Run()
 	exec.Command("docker", "rm", containerName).Run()
-
 	worktree.Remove(m.projectDir, name)
 
+	// Now grab the lock briefly to update state
+	m.mu.Lock()
 	delete(m.state.Sandboxes, name)
 	m.persist()
+	m.mu.Unlock()
+
 	return nil
 }
 
@@ -239,11 +318,13 @@ func (m *Manager) imageName() string {
 
 func (m *Manager) buildImage() error {
 	dockerfilePath := m.cfg.Image.Dockerfile
-	cmd := exec.Command("docker", "build", "-t", m.imageName(), "-f", dockerfilePath, ".")
+	cmd := exec.Command("docker", "build", "-q", "-t", m.imageName(), "-f", dockerfilePath, ".")
 	cmd.Dir = m.projectDir
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("docker build failed: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	return nil
 }
 
 func (m *Manager) queryPorts(containerName string) map[string]string {

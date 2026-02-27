@@ -9,16 +9,17 @@ import (
 
 // model is the Bubble Tea model for the sandcastles TUI.
 type model struct {
-	manager   *sandbox.Manager
-	cfg       *config.Config
-	input     textinput.Model
-	cursor    int
-	message   string
-	isError   bool
-	quitting  bool
-	connectTo string // sandbox name to connect to after tea quits
-	width     int
-	height    int
+	manager    *sandbox.Manager
+	cfg        *config.Config
+	input      textinput.Model
+	cursor     int
+	message    string
+	isError    bool
+	quitting   bool
+	connectTo  string // sandbox name to connect to after tea quits
+	width      int
+	height     int
+	progressCh chan sandboxProgressMsg // receives progress during create
 }
 
 func newModel(mgr *sandbox.Manager, cfg *config.Config) model {

@@ -6,6 +6,7 @@ type Status string
 const (
 	StatusCreating Status = "creating"
 	StatusRunning  Status = "running"
+	StatusStopping Status = "stopping"
 	StatusStopped  Status = "stopped"
 	StatusError    Status = "error"
 )

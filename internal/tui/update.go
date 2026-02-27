@@ -21,6 +21,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.manager.RefreshStatuses()
 		return m, tickCmd()
 
+	case sandboxProgressMsg:
+		m.message = fmt.Sprintf("[%s] %s", msg.name, msg.phase)
+		m.isError = false
+		return m, listenForProgress(m.progressCh)
+
 	case sandboxCreatedMsg:
 		if msg.err != nil {
 			m.message = fmt.Sprintf("Error: %v", msg.err)
@@ -112,10 +117,19 @@ func (m model) processInput() (tea.Model, tea.Cmd) {
 		if len(cmd.Args) > 1 {
 			task = strings.Join(cmd.Args[1:], " ")
 		}
-		m.message = fmt.Sprintf("Creating sandbox %s...", name)
+		m.message = fmt.Sprintf("[%s] Starting...", name)
 		m.isError = false
-		return m, func() tea.Msg {
-			sb, err := m.manager.Create(name, task)
+
+		// Create a progress channel for streaming build phases
+		ch := make(chan sandboxProgressMsg, 8)
+		m.progressCh = ch
+
+		createCmd := func() tea.Msg {
+			progress := func(phase string) {
+				ch <- sandboxProgressMsg{name: name, phase: phase}
+			}
+			sb, err := m.manager.Create(name, task, progress)
+			close(ch)
 			if err != nil {
 				return sandboxCreatedMsg{name: name, err: err}
 			}
@@ -123,11 +137,13 @@ func (m model) processInput() (tea.Model, tea.Cmd) {
 			if task != "" {
 				containerName := fmt.Sprintf("sc-%s", sb.Name)
 				if err := agent.Start(containerName, task); err != nil {
-					fmt.Printf("Warning: agent auto-start failed: %v\n", err)
+					// swallow — user will see in the tmux session
 				}
 			}
 			return sandboxCreatedMsg{name: name}
 		}
+
+		return m, tea.Batch(createCmd, listenForProgress(ch))
 
 	case "/stop":
 		if len(cmd.Args) < 1 {
@@ -136,6 +152,9 @@ func (m model) processInput() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		name := cmd.Args[0]
+		m.manager.MarkStopping(name)
+		m.message = fmt.Sprintf("Stopping sandbox %s...", name)
+		m.isError = false
 		return m, func() tea.Msg {
 			m.manager.Destroy(name)
 			return sandboxDestroyedMsg{name: name}

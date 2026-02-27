@@ -89,22 +89,43 @@ func initCmd() *cobra.Command {
 }
 
 func writeDockerfile(projectDir string, cfg *config.Config) error {
-	packages := strings.Join(cfg.Image.Packages, " ")
+	// Ensure npm is always available (needed for Claude Code)
+	pkgs := cfg.Image.Packages
+	hasNpm := false
+	for _, p := range pkgs {
+		if p == "npm" {
+			hasNpm = true
+			break
+		}
+	}
+	if !hasNpm {
+		pkgs = append(pkgs, "npm")
+	}
+	packages := strings.Join(pkgs, " ")
 
 	content := fmt.Sprintf(`FROM %s
 
 RUN apt-get update && apt-get install -y \
     tmux \
     %s \
+    sudo \
     && rm -rf /var/lib/apt/lists/*
 
-RUN mkdir -p /workspace
+RUN npm install -g @anthropic-ai/claude-code
+
+# Non-root user (Claude Code refuses --dangerously-skip-permissions as root)
+RUN useradd -m -s /bin/bash -G sudo sandcastle && \
+    echo 'sandcastle ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
+
+RUN mkdir -p /workspace && chown sandcastle:sandcastle /workspace
 WORKDIR /workspace
 
-RUN echo 'set -g mouse on' > /root/.tmux.conf && \
-    echo 'set -g status-style "bg=#1a1a2e,fg=#FFD700"' >> /root/.tmux.conf && \
-    echo 'set -g status-left " 🏰 sandcastle "' >> /root/.tmux.conf && \
-    echo 'set -g status-right " %%H:%%M "' >> /root/.tmux.conf
+USER sandcastle
+
+RUN echo 'set -g mouse on' > ~/.tmux.conf && \
+    echo 'set -g status-style "bg=#1a1a2e,fg=#FFD700"' >> ~/.tmux.conf && \
+    echo 'set -g status-left " sandcastle "' >> ~/.tmux.conf && \
+    echo 'set -g status-right " %%H:%%M "' >> ~/.tmux.conf
 
 CMD ["sleep", "infinity"]
 `, cfg.Image.Base, packages)

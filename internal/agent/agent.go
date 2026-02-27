@@ -13,7 +13,8 @@ func Start(containerName, task string) error {
 	}
 
 	// Use tmux send-keys to type the claude command into the session
-	claudeCmd := fmt.Sprintf("claude --dangerously-skip-permissions %q", task)
+	// Settings are pre-patched with defaultMode=bypassPermissions, so no flag needed
+	claudeCmd := fmt.Sprintf("claude %q", task)
 
 	cmd := exec.Command("docker", "exec", containerName,
 		"tmux", "send-keys", "-t", "main", claudeCmd, "Enter")

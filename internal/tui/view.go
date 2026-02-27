@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -87,9 +88,14 @@ func (m model) renderSandbox(index int, sb *sandbox.Sandbox) string {
 		parts = append(parts, taskStyle.Render(sb.Task))
 	}
 
-	// Show port mappings
-	for container, host := range sb.Ports {
-		parts = append(parts, portStyle.Render(fmt.Sprintf(":%s→:%s", container, host)))
+	// Show port mappings (sorted for stable display)
+	portKeys := make([]string, 0, len(sb.Ports))
+	for k := range sb.Ports {
+		portKeys = append(portKeys, k)
+	}
+	sort.Strings(portKeys)
+	for _, container := range portKeys {
+		parts = append(parts, portStyle.Render(fmt.Sprintf(":%s→:%s", container, sb.Ports[container])))
 	}
 
 	return strings.Join(parts, "  ")
@@ -99,6 +105,8 @@ func statusIndicator(s sandbox.Status) (string, lipgloss.Style) {
 	switch s {
 	case sandbox.StatusRunning:
 		return "●", statusRunning
+	case sandbox.StatusStopping:
+		return "◍", statusOther
 	case sandbox.StatusStopped:
 		return "○", statusStopped
 	default:
