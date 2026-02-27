@@ -2,6 +2,7 @@ package worktree
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -38,6 +39,22 @@ func Remove(projectDir, name string) error {
 	cmd := exec.Command("git", "worktree", "remove", "--force", wtPath)
 	cmd.Dir = projectDir
 	cmd.Run() // best-effort
+
+	// If the directory still exists (e.g. files owned by container UID),
+	// use a Docker container to remove it as root.
+	if _, err := os.Stat(wtPath); err == nil {
+		absPath, _ := filepath.Abs(wtPath)
+		if absPath != "" {
+			exec.Command("docker", "run", "--rm",
+				"-v", absPath+":/cleanup",
+				"alpine", "rm", "-rf", "/cleanup").Run()
+		}
+	}
+
+	// Prune stale worktree metadata if the directory is gone
+	pruneCmd := exec.Command("git", "worktree", "prune")
+	pruneCmd.Dir = projectDir
+	pruneCmd.Run() // best-effort
 
 	// Delete the branch
 	branchCmd := exec.Command("git", "branch", "-D", branch)
