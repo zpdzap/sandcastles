@@ -442,8 +442,12 @@ func (m *Manager) persist() {
 	if diskState != nil {
 		for name, diskSb := range diskState.Sandboxes {
 			if _, exists := m.state.Sandboxes[name]; !exists {
-				// Other instance created this — keep it
-				m.state.Sandboxes[name] = diskSb
+				// Only adopt if the container actually exists — otherwise
+				// we'd resurrect sandboxes that were intentionally destroyed.
+				containerName := fmt.Sprintf("sc-%s", name)
+				if inspectStatus(containerName) != "" {
+					m.state.Sandboxes[name] = diskSb
+				}
 			}
 		}
 	}
