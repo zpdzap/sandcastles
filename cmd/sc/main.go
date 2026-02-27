@@ -153,8 +153,9 @@ RUN apt-get update && apt-get install -y \
 RUN npm install -g @anthropic-ai/claude-code
 
 # Non-root user with host UID/GID so bind-mounted files are writable
-RUN groupadd -g $HOST_GID sandcastle 2>/dev/null || true && \
-    useradd -m -s /bin/bash -u $HOST_UID -g $HOST_GID -G %s sandcastle && \
+RUN groupadd -g $HOST_GID sandcastle 2>/dev/null; \
+    useradd -m -s /bin/bash -u $HOST_UID -g $HOST_GID -G %s sandcastle 2>/dev/null || \
+    useradd -m -s /bin/bash -u $HOST_UID -G %s sandcastle && \
     echo 'sandcastle ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 
 # Go tools on PATH
@@ -171,7 +172,7 @@ RUN echo 'set -g mouse on' > ~/.tmux.conf && \
     echo 'set -g status-right " %%H:%%M "' >> ~/.tmux.conf
 
 CMD ["sleep", "infinity"]
-`, cfg.Image.Base, packages, dockerCompose, userGroups)
+`, cfg.Image.Base, packages, dockerCompose, userGroups, userGroups)
 
 	path := filepath.Join(projectDir, config.Dir, "Dockerfile")
 	return os.WriteFile(path, []byte(content), 0o644)
