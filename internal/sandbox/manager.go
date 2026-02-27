@@ -76,9 +76,18 @@ func (m *Manager) Create(name, task string, progress ProgressFunc) (*Sandbox, er
 		"-v", fmt.Sprintf("%s:/workspace", wtPath),
 	}
 
-	// Port mappings
-	for _, port := range m.cfg.Defaults.Ports {
-		args = append(args, "-p", fmt.Sprintf("0:%d", port))
+	// Docker socket mount
+	if m.cfg.Defaults.DockerSocket {
+		args = append(args, "-v", "/var/run/docker.sock:/var/run/docker.sock")
+	}
+
+	// Network mode and port mappings
+	if m.cfg.Defaults.IsHostNetwork() {
+		args = append(args, "--network", "host")
+	} else {
+		for _, port := range m.cfg.Defaults.Ports {
+			args = append(args, "-p", fmt.Sprintf("0:%d", port))
+		}
 	}
 
 	// Environment variables
@@ -177,7 +186,12 @@ json.dump(d, open(p, 'w'))
 	}
 
 	// Query port mappings
-	ports := m.queryPorts(containerName)
+	var ports map[string]string
+	if m.cfg.Defaults.IsHostNetwork() {
+		ports = m.identityPorts()
+	} else {
+		ports = m.queryPorts(containerName)
+	}
 
 	sb := &Sandbox{
 		Name:         name,
@@ -277,7 +291,11 @@ func (m *Manager) Reconcile() error {
 
 		// Refresh port mappings for running containers
 		if newStatus == StatusRunning {
-			sb.Ports = m.queryPorts(containerName)
+			if m.cfg.Defaults.IsHostNetwork() {
+				sb.Ports = m.identityPorts()
+			} else {
+				sb.Ports = m.queryPorts(containerName)
+			}
 		}
 	}
 
@@ -287,18 +305,42 @@ func (m *Manager) Reconcile() error {
 	return nil
 }
 
-// RefreshStatuses polls Docker for current container statuses.
+// RefreshStatuses re-reads the state file (picks up changes from other instances)
+// and polls Docker for current container statuses.
 func (m *Manager) RefreshStatuses() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	// Re-read state from disk to sync with other instances
+	diskState, _ := loadState(m.projectDir)
+
+	// Merge in sandboxes from disk that we don't know about (created by other instances)
+	if diskState != nil {
+		for name, diskSb := range diskState.Sandboxes {
+			if _, exists := m.state.Sandboxes[name]; !exists {
+				m.state.Sandboxes[name] = diskSb
+			}
+		}
+	}
 
 	for name, sb := range m.state.Sandboxes {
 		// Don't overwrite transient states managed by the TUI
 		if sb.Status == StatusStopping {
 			continue
 		}
+
 		containerName := fmt.Sprintf("sc-%s", name)
 		status := inspectStatus(containerName)
+
+		// If another instance removed this sandbox from state.json and the
+		// container is gone, remove it from our in-memory state too
+		if status == "" && diskState != nil {
+			if _, onDisk := diskState.Sandboxes[name]; !onDisk {
+				delete(m.state.Sandboxes, name)
+				continue
+			}
+		}
+
 		if status == "" {
 			sb.Status = StatusStopped
 		} else {
@@ -337,6 +379,16 @@ func (m *Manager) buildImage() error {
 	return nil
 }
 
+// identityPorts returns port mappings where host and container ports are identical (for host networking).
+func (m *Manager) identityPorts() map[string]string {
+	ports := make(map[string]string)
+	for _, port := range m.cfg.Defaults.Ports {
+		p := fmt.Sprintf("%d", port)
+		ports[p] = p
+	}
+	return ports
+}
+
 func (m *Manager) queryPorts(containerName string) map[string]string {
 	ports := make(map[string]string)
 	out, err := exec.Command("docker", "port", containerName).CombinedOutput()
@@ -362,6 +414,17 @@ func (m *Manager) queryPorts(containerName string) map[string]string {
 }
 
 func (m *Manager) persist() {
+	// Read-merge-write: load disk state first so we don't clobber
+	// sandboxes created by other sc instances.
+	diskState, _ := loadState(m.projectDir)
+	if diskState != nil {
+		for name, diskSb := range diskState.Sandboxes {
+			if _, exists := m.state.Sandboxes[name]; !exists {
+				// Other instance created this — keep it
+				m.state.Sandboxes[name] = diskSb
+			}
+		}
+	}
 	if err := saveState(m.projectDir, m.state); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to save state: %v\n", err)
 	}

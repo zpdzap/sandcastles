@@ -54,10 +54,11 @@ func initCmd() *cobra.Command {
 					Packages:   detection.Packages,
 				},
 				Defaults: config.Defaults{
-					Agent:  "claude",
-					Ports:  detection.Ports,
-					Env:    map[string]string{},
-					Mounts: nil,
+					Agent:        "claude",
+					Ports:        detection.Ports,
+					Env:          map[string]string{},
+					Mounts:       nil,
+					DockerSocket: detection.DockerSocket,
 				},
 			}
 
@@ -82,6 +83,12 @@ func initCmd() *cobra.Command {
 			fmt.Printf("Initialized sandcastles for %s (%s project)\n", projectName, detection.Language)
 			fmt.Printf("  Config: %s/%s\n", config.Dir, config.ConfigFile)
 			fmt.Printf("  Dockerfile: %s/Dockerfile\n", config.Dir)
+			if detection.DockerSocket {
+				fmt.Println("\n  Detected docker-compose files — docker_socket enabled.")
+				fmt.Println("  If your tests need localhost access to containers, add to config.yaml:")
+				fmt.Println("    defaults:")
+				fmt.Println("      network: host")
+			}
 			fmt.Println("\nRun `sc` to launch the dashboard.")
 			return nil
 		},
@@ -101,7 +108,25 @@ func writeDockerfile(projectDir string, cfg *config.Config) error {
 	if !hasNpm {
 		pkgs = append(pkgs, "npm")
 	}
+	// Docker CLI for docker socket support
+	if cfg.Defaults.DockerSocket {
+		hasDocker := false
+		for _, p := range pkgs {
+			if p == "docker.io" {
+				hasDocker = true
+				break
+			}
+		}
+		if !hasDocker {
+			pkgs = append(pkgs, "docker.io")
+		}
+	}
 	packages := strings.Join(pkgs, " ")
+
+	userGroups := "sudo"
+	if cfg.Defaults.DockerSocket {
+		userGroups = "sudo,docker"
+	}
 
 	content := fmt.Sprintf(`FROM %s
 
@@ -114,7 +139,7 @@ RUN apt-get update && apt-get install -y \
 RUN npm install -g @anthropic-ai/claude-code
 
 # Non-root user (Claude Code refuses --dangerously-skip-permissions as root)
-RUN useradd -m -s /bin/bash -G sudo sandcastle && \
+RUN useradd -m -s /bin/bash -G %s sandcastle && \
     echo 'sandcastle ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 
 RUN mkdir -p /workspace && chown sandcastle:sandcastle /workspace
@@ -128,7 +153,7 @@ RUN echo 'set -g mouse on' > ~/.tmux.conf && \
     echo 'set -g status-right " %%H:%%M "' >> ~/.tmux.conf
 
 CMD ["sleep", "infinity"]
-`, cfg.Image.Base, packages)
+`, cfg.Image.Base, packages, userGroups)
 
 	path := filepath.Join(projectDir, config.Dir, "Dockerfile")
 	return os.WriteFile(path, []byte(content), 0o644)

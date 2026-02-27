@@ -23,9 +23,7 @@ func Run(mgr *sandbox.Manager, cfg *config.Config) error {
 		final := result.(model)
 
 		if final.quitting {
-			fmt.Println("Shutting down sandcastles...")
-			mgr.DestroyAll()
-			fmt.Println("Goodbye!")
+			fmt.Println("Goodbye! (sandcastles still running — use /stop to tear them down)")
 			return nil
 		}
 

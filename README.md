@@ -67,7 +67,57 @@ defaults:
   mounts: []
 ```
 
-Ports listed in `defaults.ports` are auto-mapped to random host ports. The dashboard shows the mapping.
+### Ports
+
+Ports listed in `defaults.ports` are auto-mapped to random host ports via Docker's `-p 0:<port>` syntax. The dashboard shows the actual mapping (e.g. `:3000→:49321`).
+
+### Extra Mounts
+
+Use `defaults.mounts` to give agents access to files outside the project repo. Each entry is a standard Docker volume mount string: `host_path:container_path[:options]`.
+
+```yaml
+defaults:
+  mounts:
+    - /home/me/workspace/TICKETS.md:/context/TICKETS.md:ro
+    - /home/me/workspace/docs:/context/docs:ro
+    - /home/me/other-repo:/repos/other-repo
+```
+
+Inside the container:
+- `/workspace/` — the project's git worktree (read-write, isolated branch)
+- `/context/` (or wherever you mount) — extra files from the host
+
+**Common patterns:**
+
+| Use case | Mount |
+|----------|-------|
+| Task list / tickets | `/path/to/TICKETS.md:/context/TICKETS.md:ro` |
+| Shared documentation | `/path/to/docs:/context/docs:ro` |
+| Another repo (read-only reference) | `/path/to/other-repo:/repos/other-repo:ro` |
+| Another repo (writable) | `/path/to/other-repo:/repos/other-repo` |
+
+**Tip:** Mount most things `:ro` (read-only). Only the primary worktree at `/workspace` should typically be writable — that's the code the agent is working on.
+
+### Telling the Agent About Mounts
+
+Your project's `CLAUDE.md` is already in the worktree at `/workspace/CLAUDE.md`, so the agent sees it automatically. Add a section to let the agent know where context files live:
+
+```markdown
+## Sandcastle Environment
+
+If running inside a sandcastle container, external context files are at `/context/`:
+
+- `/context/TICKETS.md` — project tickets
+- `/context/docs/` — shared documentation
+
+Use these paths instead of absolute host paths.
+```
+
+This way the agent knows to look at `/context/TICKETS.md` instead of `/home/you/workspace/TICKETS.md`.
+
+## Multi-Instance
+
+Multiple `sc` instances in the same project share state via `.sandcastles/state.json`. Sandcastles created in one terminal window appear in all others within a few seconds.
 
 ## License
 

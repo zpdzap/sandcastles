@@ -106,7 +106,13 @@ func (m model) renderSandbox(index int, sb *sandbox.Sandbox) string {
 	}
 	sort.Strings(portKeys)
 	for _, container := range portKeys {
-		parts = append(parts, portStyle.Render(fmt.Sprintf(":%s→:%s", container, sb.Ports[container])))
+		host := sb.Ports[container]
+		if container == host {
+			// Host networking — no mapping needed
+			parts = append(parts, portStyle.Render(fmt.Sprintf(":%s", container)))
+		} else {
+			parts = append(parts, portStyle.Render(fmt.Sprintf(":%s→:%s", container, host)))
+		}
 	}
 
 	return strings.Join(parts, "  ")

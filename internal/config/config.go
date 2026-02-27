@@ -30,11 +30,16 @@ type Image struct {
 }
 
 type Defaults struct {
-	Agent  string            `yaml:"agent"`
-	Ports  []int             `yaml:"ports"`
-	Env    map[string]string `yaml:"env"`
-	Mounts []string          `yaml:"mounts"`
+	Agent        string            `yaml:"agent"`
+	Ports        []int             `yaml:"ports"`
+	Env          map[string]string `yaml:"env"`
+	Mounts       []string          `yaml:"mounts"`
+	Network      string            `yaml:"network,omitempty"`
+	DockerSocket bool              `yaml:"docker_socket,omitempty"`
 }
+
+// IsHostNetwork returns true if the sandbox should use host networking.
+func (d Defaults) IsHostNetwork() bool { return d.Network == "host" }
 
 // Load reads config from .sandcastles/config.yaml relative to projectDir.
 func Load(projectDir string) (*Config, error) {

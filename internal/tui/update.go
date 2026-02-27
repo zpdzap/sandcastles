@@ -48,6 +48,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case allDestroyedMsg:
+		m.message = fmt.Sprintf("Destroyed %d sandcastles", msg.count)
+		m.isError = false
+		m.cursor = 0
+		return m, nil
+
 	case tea.KeyMsg:
 		if m.commanding {
 			return m.handleCommandMode(msg)
@@ -179,9 +185,27 @@ func (m model) processInput() (tea.Model, tea.Cmd) {
 
 	case "stop":
 		if len(parts) < 2 {
-			m.message = "Usage: /stop <name>"
+			m.message = "Usage: /stop <name> or /stop all"
 			m.isError = true
 			return m, nil
+		}
+		if parts[1] == "all" {
+			sandboxes := m.manager.List()
+			if len(sandboxes) == 0 {
+				m.message = "No sandcastles to stop"
+				m.isError = false
+				return m, nil
+			}
+			count := len(sandboxes)
+			for _, sb := range sandboxes {
+				m.manager.MarkStopping(sb.Name)
+			}
+			m.message = fmt.Sprintf("Stopping %d sandcastles...", count)
+			m.isError = false
+			return m, func() tea.Msg {
+				m.manager.DestroyAll()
+				return allDestroyedMsg{count: count}
+			}
 		}
 		name := parts[1]
 		m.manager.MarkStopping(name)

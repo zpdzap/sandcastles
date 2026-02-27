@@ -6,9 +6,10 @@ import (
 )
 
 type Detection struct {
-	Language string
-	Packages []string
-	Ports    []int
+	Language     string
+	Packages     []string
+	Ports        []int
+	DockerSocket bool
 }
 
 // Detect inspects the project directory and returns language, suggested packages, and ports.
@@ -26,19 +27,40 @@ func Detect(projectDir string) Detection {
 		{"pyproject.toml", "python", []string{"python3", "python3-pip", "git", "curl"}, []int{8000}},
 	}
 
+	var det Detection
 	for _, c := range checks {
 		if _, err := os.Stat(filepath.Join(projectDir, c.file)); err == nil {
-			return Detection{
+			det = Detection{
 				Language: c.language,
 				Packages: c.packages,
 				Ports:    c.ports,
 			}
+			break
 		}
 	}
 
-	return Detection{
-		Language: "unknown",
-		Packages: []string{"git", "curl"},
-		Ports:    nil,
+	if det.Language == "" {
+		det = Detection{
+			Language: "unknown",
+			Packages: []string{"git", "curl"},
+			Ports:    nil,
+		}
 	}
+
+	// Detect docker-compose files
+	composeFiles := []string{
+		"docker-compose.yml",
+		"docker-compose.yaml",
+		"docker-compose.test.yml",
+		"compose.yml",
+		"compose.yaml",
+	}
+	for _, f := range composeFiles {
+		if _, err := os.Stat(filepath.Join(projectDir, f)); err == nil {
+			det.DockerSocket = true
+			break
+		}
+	}
+
+	return det
 }

@@ -17,6 +17,11 @@ type sandboxDestroyedMsg struct {
 	name string
 }
 
+// allDestroyedMsg is sent when all sandboxes have been destroyed.
+type allDestroyedMsg struct {
+	count int
+}
+
 // statusTickMsg triggers a status refresh poll.
 type statusTickMsg time.Time
 
