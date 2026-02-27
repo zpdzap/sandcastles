@@ -141,6 +141,9 @@ RUN mkdir -p /usr/local/lib/docker/cli-plugins && \
 
 	content := fmt.Sprintf(`FROM %s
 
+ARG HOST_UID=1000
+ARG HOST_GID=1000
+
 RUN apt-get update && apt-get install -y \
     tmux \
     %s \
@@ -149,9 +152,13 @@ RUN apt-get update && apt-get install -y \
 %s
 RUN npm install -g @anthropic-ai/claude-code
 
-# Non-root user (Claude Code refuses --dangerously-skip-permissions as root)
-RUN useradd -m -s /bin/bash -G %s sandcastle && \
+# Non-root user with host UID/GID so bind-mounted files are writable
+RUN groupadd -g $HOST_GID sandcastle 2>/dev/null || true && \
+    useradd -m -s /bin/bash -u $HOST_UID -g $HOST_GID -G %s sandcastle && \
     echo 'sandcastle ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
+
+# Go tools on PATH
+ENV PATH="/home/sandcastle/go/bin:${PATH}"
 
 RUN mkdir -p /workspace && chown sandcastle:sandcastle /workspace
 WORKDIR /workspace

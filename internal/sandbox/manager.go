@@ -392,7 +392,12 @@ func (m *Manager) imageName() string {
 
 func (m *Manager) buildImage() error {
 	dockerfilePath := m.cfg.Image.Dockerfile
-	cmd := exec.Command("docker", "build", "-q", "-t", m.imageName(), "-f", dockerfilePath, ".")
+	uid := fmt.Sprintf("%d", os.Getuid())
+	gid := fmt.Sprintf("%d", os.Getgid())
+	cmd := exec.Command("docker", "build", "-q",
+		"--build-arg", "HOST_UID="+uid,
+		"--build-arg", "HOST_GID="+gid,
+		"-t", m.imageName(), "-f", dockerfilePath, ".")
 	cmd.Dir = m.projectDir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
