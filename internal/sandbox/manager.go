@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/zpdzap/sandcastles/internal/config"
@@ -79,6 +80,11 @@ func (m *Manager) Create(name, task string, progress ProgressFunc) (*Sandbox, er
 	// Docker socket mount
 	if m.cfg.Defaults.DockerSocket {
 		args = append(args, "-v", "/var/run/docker.sock:/var/run/docker.sock")
+		// Add the host's docker socket GID so the sandcastle user can access it
+		// (container's docker group GID won't match the host's)
+		if gid, err := socketGroupID("/var/run/docker.sock"); err == nil {
+			args = append(args, "--group-add", gid)
+		}
 	}
 
 	// Network mode and port mappings
@@ -428,6 +434,19 @@ func (m *Manager) persist() {
 	if err := saveState(m.projectDir, m.state); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to save state: %v\n", err)
 	}
+}
+
+// socketGroupID returns the group ID of the given socket file as a string.
+func socketGroupID(path string) (string, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return "", fmt.Errorf("unsupported platform")
+	}
+	return fmt.Sprintf("%d", stat.Gid), nil
 }
 
 func inspectStatus(containerName string) string {
