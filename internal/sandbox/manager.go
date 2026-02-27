@@ -355,6 +355,22 @@ func (m *Manager) RefreshStatuses() {
 	}
 }
 
+// CleanupStopped removes sandboxes that are not running (stopped, error, etc).
+func (m *Manager) CleanupStopped() {
+	m.mu.Lock()
+	var names []string
+	for name, sb := range m.state.Sandboxes {
+		if sb.Status != StatusRunning && sb.Status != StatusCreating {
+			names = append(names, name)
+		}
+	}
+	m.mu.Unlock()
+
+	for _, name := range names {
+		m.Destroy(name)
+	}
+}
+
 // DestroyAll destroys all sandboxes.
 func (m *Manager) DestroyAll() {
 	// Collect names first (Destroy takes the lock)
