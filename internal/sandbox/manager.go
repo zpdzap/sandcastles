@@ -162,7 +162,11 @@ func (m *Manager) Create(name, task string, progress ProgressFunc) (*Sandbox, er
 				// symlinks as-is, leaving them broken inside the container.
 				tarCmd := fmt.Sprintf("tar -chf - -C %s/.claude %s | docker exec -i %s tar -xf - -C /home/sandcastle/.claude",
 					home, dir, containerName)
-				exec.Command("bash", "-c", tarCmd).Run()
+				if out, err := exec.Command("bash", "-c", tarCmd).CombinedOutput(); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: tar copy of %s failed: %s: %v\n", dir, strings.TrimSpace(string(out)), err)
+					// Fall back to docker cp (symlinks won't resolve but better than nothing)
+					exec.Command("docker", "cp", hostPath, containerName+":/home/sandcastle/.claude/"+dir).Run()
+				}
 				exec.Command("docker", "exec", "--user", "root", containerName,
 					"chown", "-R", "sandcastle:sandcastle", "/home/sandcastle/.claude/"+dir).Run()
 			}
