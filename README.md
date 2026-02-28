@@ -48,7 +48,18 @@ sc
 3. If a task is provided, Claude Code auto-starts inside the container's tmux session
 4. **Enter** on a sandbox drops you into the tmux session (detach with `Ctrl-B d`)
 5. Code changes appear in `.sandcastles/worktrees/<name>/` — open it in your IDE
-6. **`/stop`** cleans up the container, worktree, and branch
+6. **`/merge`** merges the sandbox's branch into your current branch
+7. **`/stop`** cleans up the container, worktree, and branch
+
+### Merge Workflow
+
+Each sandcastle works on its own git branch (`sc-<name>`). When the agent's work is ready:
+
+1. `/diff <name>` — review changes from the TUI
+2. `/merge <name>` — merges the branch into your current branch (auto-commits any uncommitted work in the worktree first)
+3. `/stop <name>` — cleans up the container, worktree, and branch
+
+Since worktrees share the same git database, the merge is entirely local — no push required.
 
 ## Config
 
@@ -80,8 +91,21 @@ Set `claude_env: true` to copy your local Claude Code configuration into sandcas
 - **Skills** (`~/.claude/skills/`) — custom skills you've written
 - **Plugins** (`~/.claude/plugins/`) — installed plugins (superpowers, LSP, etc.)
 - **Settings** (`~/.claude/settings.json`) — model preferences, enabled plugins
+- **Credentials** (`~/.claude/.credentials.json`) — API authentication
 
-Plugin project paths are automatically rewritten from host paths to `/workspace/` so project-scoped plugins load correctly inside containers. Detected automatically if `~/.claude/` exists on the host.
+Plugin project paths are automatically rewritten from host paths to `/workspace/` so project-scoped plugins load correctly inside containers. A symlink from the host's `~/.claude` to the container's ensures plugin install paths resolve even if Claude Code auto-updates plugins at startup.
+
+Detected automatically if `~/.claude/` exists on the host.
+
+**Important:** Project-scoped plugins (like superpowers) must be listed in your project's `.claude/settings.json` under `enabledPlugins` for them to load inside containers:
+
+```json
+{
+  "enabledPlugins": {
+    "superpowers@claude-plugins-official": true
+  }
+}
+```
 
 ### Setup Commands
 
