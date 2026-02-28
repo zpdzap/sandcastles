@@ -202,6 +202,15 @@ json.dump(d, open(p, 'w'))
 		fmt.Fprintf(os.Stderr, "Warning: tmux start failed: %v\n", err)
 	}
 
+	// Customize tmux status bar with sandbox name and exit hint
+	tmuxSetup := fmt.Sprintf(
+		`tmux set -t main status-left " sandcastle: %s " && `+
+			`tmux set -t main status-right " ctrl-b d to exit " && `+
+			`tmux set -t main status-left-length 40`,
+		name,
+	)
+	exec.Command("docker", "exec", containerName, "bash", "-c", tmuxSetup).Run()
+
 	// Query port mappings
 	var ports map[string]string
 	if m.cfg.Defaults.IsHostNetwork() {
