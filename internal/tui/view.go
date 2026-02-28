@@ -77,7 +77,15 @@ func (m model) View() string {
 		b.WriteString("\n")
 	}
 
-	return b.String()
+	// Pad to fill terminal height so stale lines from previous renders
+	// are overwritten (Bubble Tea only repaints lines it outputs)
+	content := b.String()
+	lines := strings.Count(content, "\n")
+	for i := lines; i < m.height; i++ {
+		content += "\n"
+	}
+
+	return content
 }
 
 func (m model) renderSandbox(index int, sb *sandbox.Sandbox) string {
