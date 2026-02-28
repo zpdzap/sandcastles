@@ -23,8 +23,8 @@ type model struct {
 	connectTo  string // sandbox name to connect to after tea quits
 	width      int
 	height     int
-	progressName  string // name of sandbox being created
-	progressPhase string // current phase (read by view on tick)
+	progressName  string  // name of sandbox being created
+	progressPhase *string // current phase (shared pointer so background goroutine updates are visible)
 }
 
 func newModel(mgr *sandbox.Manager, cfg *config.Config) model {

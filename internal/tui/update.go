@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -10,26 +11,28 @@ import (
 	"github.com/zpdzap/sandcastles/internal/agent"
 )
 
+var validName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9-]*$`)
+
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.input.Width = msg.Width - 6 // account for "  / " prefix
+		m.input.Width = msg.Width - 6 // account for "  > /" prefix
 		return m, nil
 
 	case statusTickMsg:
 		m.manager.RefreshStatuses()
 		// Pick up progress updates from the background create goroutine
-		if m.progressPhase != "" {
-			m.message = fmt.Sprintf("[%s] %s", m.progressName, m.progressPhase)
+		if m.progressPhase != nil && *m.progressPhase != "" {
+			m.message = fmt.Sprintf("[%s] %s", m.progressName, *m.progressPhase)
 			m.isError = false
 		}
 		return m, tickCmd()
 
 	case sandboxCreatedMsg:
 		m.progressName = ""
-		m.progressPhase = ""
+		m.progressPhase = nil
 		if msg.err != nil {
 			m.message = fmt.Sprintf("Error: %v", msg.err)
 			m.isError = true
@@ -161,18 +164,25 @@ func (m model) processInput() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		name := parts[1]
+		if !validName.MatchString(name) {
+			m.message = "Name must be alphanumeric (hyphens ok, e.g. my-sandbox)"
+			m.isError = true
+			return m, nil
+		}
 		task := ""
 		if len(parts) > 2 {
 			task = strings.Join(parts[2:], " ")
 		}
 		m.progressName = name
-		m.progressPhase = "Starting..."
+		phase := "Starting..."
+		m.progressPhase = &phase
 		m.message = fmt.Sprintf("[%s] Starting...", name)
 		m.isError = false
 
+		pp := m.progressPhase // capture pointer for closure
 		return m, func() tea.Msg {
-			progress := func(phase string) {
-				m.progressPhase = phase
+			progress := func(p string) {
+				*pp = p
 			}
 			sb, err := m.manager.Create(name, task, progress)
 			if err != nil {

@@ -10,6 +10,7 @@ type Detection struct {
 	Packages     []string
 	Ports        []int
 	DockerSocket bool
+	Setup        []string
 }
 
 // Detect inspects the project directory and returns language, suggested packages, and ports.
@@ -19,12 +20,13 @@ func Detect(projectDir string) Detection {
 		language string
 		packages []string
 		ports    []int
+		setup    []string
 	}{
-		{"go.mod", "go", []string{"golang-go", "git", "curl", "make", "lsof"}, []int{8080}},
-		{"package.json", "node", []string{"nodejs", "npm", "git", "curl", "make", "lsof"}, []int{3000}},
-		{"requirements.txt", "python", []string{"python3", "python3-pip", "git", "curl", "make", "lsof"}, []int{8000}},
-		{"Cargo.toml", "rust", []string{"rustc", "cargo", "git", "curl", "make", "lsof"}, []int{8080}},
-		{"pyproject.toml", "python", []string{"python3", "python3-pip", "git", "curl", "make", "lsof"}, []int{8000}},
+		{"go.mod", "go", []string{"golang-go", "git", "curl", "make", "lsof"}, []int{8080}, nil},
+		{"package.json", "node", []string{"nodejs", "npm", "git", "curl", "make", "lsof"}, []int{3000}, []string{"cd /workspace && npm install"}},
+		{"requirements.txt", "python", []string{"python3", "python3-pip", "git", "curl", "make", "lsof"}, []int{8000}, []string{"cd /workspace && pip install -r requirements.txt"}},
+		{"Cargo.toml", "rust", []string{"rustc", "cargo", "git", "curl", "make", "lsof"}, []int{8080}, nil},
+		{"pyproject.toml", "python", []string{"python3", "python3-pip", "git", "curl", "make", "lsof"}, []int{8000}, []string{"cd /workspace && pip install -e ."}},
 	}
 
 	var det Detection
@@ -34,6 +36,7 @@ func Detect(projectDir string) Detection {
 				Language: c.language,
 				Packages: c.packages,
 				Ports:    c.ports,
+				Setup:    c.setup,
 			}
 			break
 		}
@@ -42,7 +45,7 @@ func Detect(projectDir string) Detection {
 	if det.Language == "" {
 		det = Detection{
 			Language: "unknown",
-			Packages: []string{"git", "curl"},
+			Packages: []string{"git", "curl", "make", "lsof"},
 			Ports:    nil,
 		}
 	}

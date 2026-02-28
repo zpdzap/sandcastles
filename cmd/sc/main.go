@@ -59,6 +59,7 @@ func initCmd() *cobra.Command {
 					Env:          map[string]string{},
 					Mounts:       nil,
 					DockerSocket: detection.DockerSocket,
+					Setup:        detection.Setup,
 				},
 			}
 

@@ -37,7 +37,8 @@ sc
 | `/stop <name>` | Stop and remove a sandbox |
 | `/connect <name>` | Attach to a sandbox's tmux session |
 | `/diff <name>` | Show git diff from a sandbox's worktree |
-| `/quit` | Shut down all sandboxes and exit |
+| `/stop all` | Stop and remove all sandboxes |
+| `/quit` | Exit the dashboard (running sandboxes stay alive) |
 
 ## How It Works
 
@@ -59,12 +60,44 @@ language: go
 image:
   base: ubuntu:24.04
   dockerfile: .sandcastles/Dockerfile
-  packages: [golang-go, git, curl]
+  packages: [golang-go, git, curl, make, lsof]
 defaults:
   agent: claude
   ports: [8080]
   env: {}
+  setup: []           # commands to run inside container after creation
+  network: ""         # "host" for host networking, empty for bridge (default)
+  docker_socket: false # mount /var/run/docker.sock for docker-in-docker
   mounts: []
+```
+
+### Setup Commands
+
+Commands listed in `defaults.setup` run inside the container after creation. Use these to install dependencies so agents don't have to figure it out themselves.
+
+`sc init` auto-populates setup commands based on your project type:
+- **Node.js:** `npm install`
+- **Python:** `pip install -r requirements.txt`
+
+Add project-specific commands as needed:
+
+```yaml
+defaults:
+  setup:
+    - cd /workspace/frontend && npm install
+    - cd /workspace/e2e && npm install && npx playwright install --with-deps chromium
+```
+
+### Docker Socket
+
+Set `docker_socket: true` to mount the host's Docker socket into the container. This lets agents run `docker` and `docker compose` commands (e.g. for spinning up test databases). Detected automatically if your project has a `docker-compose.yml` or `compose.yaml`.
+
+When your tests need `localhost` access to sibling containers, also set `network: host`:
+
+```yaml
+defaults:
+  docker_socket: true
+  network: host
 ```
 
 ### Ports
