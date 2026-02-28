@@ -37,7 +37,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.message = fmt.Sprintf("Created sandcastle: %s", msg.name)
 			m.isError = false
 		}
-		return m, nil
+		return m, tea.ClearScreen
 
 	case sandboxDestroyedMsg:
 		m.message = fmt.Sprintf("Destroyed sandcastle: %s", msg.name)
@@ -46,13 +46,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.cursor >= len(sandboxes) && m.cursor > 0 {
 			m.cursor--
 		}
-		return m, nil
+		return m, tea.ClearScreen
 
 	case allDestroyedMsg:
 		m.message = fmt.Sprintf("Destroyed %d sandcastles", msg.count)
 		m.isError = false
 		m.cursor = 0
-		return m, nil
+		return m, tea.ClearScreen
 
 	case tea.KeyMsg:
 		if m.commanding {
