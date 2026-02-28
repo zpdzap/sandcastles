@@ -72,7 +72,7 @@ func (m model) View() string {
 
 	// Command input — only visible in command mode
 	if m.commanding {
-		b.WriteString("  > /")
+		b.WriteString("  > ")
 		b.WriteString(m.input.View())
 		b.WriteString("\n")
 	}
