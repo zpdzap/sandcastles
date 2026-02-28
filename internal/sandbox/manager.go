@@ -157,7 +157,12 @@ func (m *Manager) Create(name, task string, progress ProgressFunc) (*Sandbox, er
 		for _, dir := range claudeDirs {
 			hostPath := home + "/.claude/" + dir
 			if info, err := os.Stat(hostPath); err == nil && info.IsDir() {
-				exec.Command("docker", "cp", hostPath, containerName+":/home/sandcastle/.claude/"+dir).Run()
+				// Use tar with --dereference to resolve symlinks (e.g. skills
+				// symlinked from other repos) instead of docker cp which copies
+				// symlinks as-is, leaving them broken inside the container.
+				tarCmd := fmt.Sprintf("tar -chf - -C %s/.claude %s | docker exec -i %s tar -xf - -C /home/sandcastle/.claude",
+					home, dir, containerName)
+				exec.Command("bash", "-c", tarCmd).Run()
 				exec.Command("docker", "exec", "--user", "root", containerName,
 					"chown", "-R", "sandcastle:sandcastle", "/home/sandcastle/.claude/"+dir).Run()
 			}
