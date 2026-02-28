@@ -1,10 +1,13 @@
 package tui
 
 import (
+	"os"
+
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/zpdzap/sandcastles/internal/config"
 	"github.com/zpdzap/sandcastles/internal/sandbox"
+	"golang.org/x/term"
 )
 
 // model is the Bubble Tea model for the sandcastles TUI.
@@ -32,10 +35,21 @@ func newModel(mgr *sandbox.Manager, cfg *config.Config) model {
 	// Input starts unfocused — activated by pressing /
 	ti.Blur()
 
+	// Get initial terminal size so the first render isn't at width=0
+	w, h, _ := term.GetSize(int(os.Stdout.Fd()))
+	if w == 0 {
+		w = 80
+	}
+	if h == 0 {
+		h = 24
+	}
+
 	return model{
 		manager: mgr,
 		cfg:     cfg,
 		input:   ti,
+		width:   w,
+		height:  h,
 	}
 }
 
