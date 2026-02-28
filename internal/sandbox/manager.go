@@ -110,6 +110,13 @@ func (m *Manager) Create(name, task string, progress ProgressFunc) (*Sandbox, er
 		args = append(args, "-e", fmt.Sprintf("%s=%s", k, v))
 	}
 
+	// GPU passthrough for X11 forwarding (headed browsers)
+	if _, hasDisplay := m.cfg.Defaults.Env["DISPLAY"]; hasDisplay {
+		if info, err := os.Stat("/dev/dri"); err == nil && info.IsDir() {
+			args = append(args, "--device", "/dev/dri")
+		}
+	}
+
 	// Extra mounts
 	for _, mount := range m.cfg.Defaults.Mounts {
 		args = append(args, "-v", mount)
