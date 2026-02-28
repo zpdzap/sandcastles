@@ -17,7 +17,13 @@ func (m model) View() string {
 	var b strings.Builder
 
 	// Header
-	header := headerStyle.Width(m.width).Render("sandcastles v0.1.0")
+	title := "sandcastles v0.1.0"
+	quip := quipStyle.Render(m.quip)
+	gap := m.width - lipgloss.Width(title) - lipgloss.Width(quip) - 4 // 4 = padding (2 each side)
+	if gap < 1 {
+		gap = 1
+	}
+	header := headerStyle.Width(m.width).Render(title + strings.Repeat(" ", gap) + quip)
 	sandboxes := m.manager.List()
 
 	noun := "sandcastles"

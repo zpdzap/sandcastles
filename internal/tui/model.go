@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"math/rand"
 	"os"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -25,6 +26,7 @@ type model struct {
 	height     int
 	progressName  string  // name of sandbox being created
 	progressPhase *string // current phase (shared pointer so background goroutine updates are visible)
+	quip          string  // random phrase shown in header, constant per session
 }
 
 func newModel(mgr *sandbox.Manager, cfg *config.Config) model {
@@ -50,6 +52,7 @@ func newModel(mgr *sandbox.Manager, cfg *config.Config) model {
 		input:   ti,
 		width:   w,
 		height:  h,
+		quip:    quips[rand.Intn(len(quips))],
 	}
 }
 

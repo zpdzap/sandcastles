@@ -45,6 +45,10 @@ var (
 			Foreground(lipgloss.Color("#FF4444")).
 			Padding(0, 2)
 
+	quipStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#8B7500")).
+			Background(lipgloss.Color("#1a1a2e"))
+
 	statusRunning = lipgloss.NewStyle().Foreground(lipgloss.Color("#00FF00"))
 	statusStopped = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000"))
 	statusOther   = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFAA00"))
