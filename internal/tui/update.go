@@ -83,7 +83,7 @@ func (m model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "/":
 		m.commanding = true
 		m.input.Focus()
-		m.input.SetValue("/")
+		m.input.SetValue("")
 		return m, textinput.Blink
 
 	case "up", "k":
