@@ -237,6 +237,10 @@ json.dump(d, open(p, 'w'))
 "`
 	exec.Command("docker", "exec", containerName, "bash", "-c", settingsPatch).Run()
 
+	// Force git to use HTTPS for GitHub (no SSH key in container, SSH hangs)
+	exec.Command("docker", "exec", containerName, "git", "config", "--global",
+		"url.https://github.com/.insteadOf", "git@github.com:").Run()
+
 	// Run post-create setup commands
 	if len(m.cfg.Defaults.Setup) > 0 {
 		report("Running setup commands...")
