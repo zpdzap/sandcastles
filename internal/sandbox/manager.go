@@ -183,6 +183,17 @@ json.dump(d, open(p, 'w'))
 "`
 	exec.Command("docker", "exec", containerName, "bash", "-c", settingsPatch).Run()
 
+	// Run post-create setup commands
+	if len(m.cfg.Defaults.Setup) > 0 {
+		report("Running setup commands...")
+		for _, cmd := range m.cfg.Defaults.Setup {
+			setupCmd := exec.Command("docker", "exec", containerName, "bash", "-c", cmd)
+			if out, err := setupCmd.CombinedOutput(); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: setup command %q failed: %s\n", cmd, strings.TrimSpace(string(out)))
+			}
+		}
+	}
+
 	// Start tmux session inside container
 	report("Starting tmux session...")
 	tmuxCmd := exec.Command("docker", "exec", "-d", containerName, "tmux", "new-session", "-d", "-s", "main")

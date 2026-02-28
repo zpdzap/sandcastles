@@ -36,6 +36,7 @@ type Defaults struct {
 	Mounts       []string          `yaml:"mounts"`
 	Network      string            `yaml:"network,omitempty"`
 	DockerSocket bool              `yaml:"docker_socket,omitempty"`
+	Setup        []string          `yaml:"setup,omitempty"`
 }
 
 // IsHostNetwork returns true if the sandbox should use host networking.
