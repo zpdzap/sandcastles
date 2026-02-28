@@ -37,12 +37,8 @@ func Run(mgr *sandbox.Manager, cfg *config.Config) error {
 			cmd.Stderr = os.Stderr
 			cmd.Run()
 
-			// Reset terminal state after tmux detach so Bubble Tea
-			// starts with a clean screen on the next iteration
-			fmt.Print("\033[?1049l") // exit alt screen (in case tmux left it)
-			fmt.Print("\033[0m")     // reset colors/attributes
-			fmt.Print("\033[2J")     // clear screen
-			fmt.Print("\033[H")      // cursor to top-left
+			// Reset terminal after tmux detach so Bubble Tea starts clean
+			fmt.Print("\033c") // full terminal reset (RIS)
 		}
 	}
 }
