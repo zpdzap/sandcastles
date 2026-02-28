@@ -37,6 +37,7 @@ type Defaults struct {
 	Network      string            `yaml:"network,omitempty"`
 	DockerSocket bool              `yaml:"docker_socket,omitempty"`
 	Setup        []string          `yaml:"setup,omitempty"`
+	ClaudeEnv    bool              `yaml:"claude_env,omitempty"`
 }
 
 // IsHostNetwork returns true if the sandbox should use host networking.

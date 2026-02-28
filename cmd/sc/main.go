@@ -60,6 +60,7 @@ func initCmd() *cobra.Command {
 					Mounts:       nil,
 					DockerSocket: detection.DockerSocket,
 					Setup:        detection.Setup,
+					ClaudeEnv:    detection.ClaudeEnv,
 				},
 			}
 
@@ -84,6 +85,10 @@ func initCmd() *cobra.Command {
 			fmt.Printf("Initialized sandcastles for %s (%s project)\n", projectName, detection.Language)
 			fmt.Printf("  Config: %s/%s\n", config.Dir, config.ConfigFile)
 			fmt.Printf("  Dockerfile: %s/Dockerfile\n", config.Dir)
+			if detection.ClaudeEnv {
+				fmt.Println("\n  Detected ~/.claude — claude_env enabled.")
+				fmt.Println("  Skills, plugins, and settings will be copied into containers.")
+			}
 			if detection.DockerSocket {
 				fmt.Println("\n  Detected docker-compose files — docker_socket enabled.")
 				fmt.Println("  If your tests need localhost access to containers, add to config.yaml:")

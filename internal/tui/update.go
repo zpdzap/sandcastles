@@ -261,6 +261,23 @@ func (m model) processInput() (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case "merge":
+		if len(parts) < 2 {
+			m.message = "Usage: /merge <name>"
+			m.isError = true
+			return m, nil
+		}
+		name := parts[1]
+		result, err := m.manager.Merge(name)
+		if err != nil {
+			m.message = fmt.Sprintf("Merge failed: %v", err)
+			m.isError = true
+		} else {
+			m.message = result
+			m.isError = false
+		}
+		return m, nil
+
 	case "quit":
 		m.quitting = true
 		return m, tea.Quit

@@ -37,6 +37,7 @@ sc
 | `/stop <name>` | Stop and remove a sandbox |
 | `/connect <name>` | Attach to a sandbox's tmux session |
 | `/diff <name>` | Show git diff from a sandbox's worktree |
+| `/merge <name>` | Merge a sandbox's branch into your current branch |
 | `/stop all` | Stop and remove all sandboxes |
 | `/quit` | Exit the dashboard (running sandboxes stay alive) |
 
@@ -68,8 +69,19 @@ defaults:
   setup: []           # commands to run inside container after creation
   network: ""         # "host" for host networking, empty for bridge (default)
   docker_socket: false # mount /var/run/docker.sock for docker-in-docker
+  claude_env: false    # copy ~/.claude (skills, plugins, settings) into containers
   mounts: []
 ```
+
+### Claude Environment
+
+Set `claude_env: true` to copy your local Claude Code configuration into sandcastle containers. This includes:
+
+- **Skills** (`~/.claude/skills/`) — custom skills you've written
+- **Plugins** (`~/.claude/plugins/`) — installed plugins (superpowers, LSP, etc.)
+- **Settings** (`~/.claude/settings.json`) — model preferences, enabled plugins
+
+Plugin project paths are automatically rewritten from host paths to `/workspace/` so project-scoped plugins load correctly inside containers. Detected automatically if `~/.claude/` exists on the host.
 
 ### Setup Commands
 

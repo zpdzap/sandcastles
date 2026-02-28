@@ -11,6 +11,7 @@ type Detection struct {
 	Ports        []int
 	DockerSocket bool
 	Setup        []string
+	ClaudeEnv    bool
 }
 
 // Detect inspects the project directory and returns language, suggested packages, and ports.
@@ -47,6 +48,13 @@ func Detect(projectDir string) Detection {
 			Language: "unknown",
 			Packages: []string{"git", "curl", "make", "lsof"},
 			Ports:    nil,
+		}
+	}
+
+	// Detect Claude Code environment
+	if home, err := os.UserHomeDir(); err == nil {
+		if _, err := os.Stat(filepath.Join(home, ".claude")); err == nil {
+			det.ClaudeEnv = true
 		}
 	}
 

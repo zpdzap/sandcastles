@@ -71,10 +71,16 @@ func (m *Manager) Create(name, task string, progress ProgressFunc) (*Sandbox, er
 	// Start container
 	report("Starting container...")
 	containerName := fmt.Sprintf("sc-%s", name)
+	// The worktree's .git file contains an absolute path back to the main repo's
+	// .git/worktrees/<name> directory. Mount the main repo's .git at its host path
+	// so git operations resolve correctly inside the container.
+	gitDir := fmt.Sprintf("%s/.git", m.projectDir)
+
 	args := []string{
 		"run", "-d",
 		"--name", containerName,
 		"-v", fmt.Sprintf("%s:/workspace", wtPath),
+		"-v", fmt.Sprintf("%s:%s", gitDir, gitDir),
 	}
 
 	// Docker socket mount
@@ -141,6 +147,45 @@ func (m *Manager) Create(name, task string, progress ProgressFunc) (*Sandbox, er
 			exec.Command("docker", "cp", hostPath, containerName+":"+containerPath).Run()
 			exec.Command("docker", "exec", "--user", "root", containerName,
 				"chown", "sandcastle:sandcastle", containerPath).Run()
+		}
+	}
+
+	// Copy skills and plugins when claude_env is enabled
+	if m.cfg.Defaults.ClaudeEnv {
+		report("Copying Claude environment (skills, plugins)...")
+		claudeDirs := []string{"skills", "plugins"}
+		for _, dir := range claudeDirs {
+			hostPath := home + "/.claude/" + dir
+			if info, err := os.Stat(hostPath); err == nil && info.IsDir() {
+				exec.Command("docker", "cp", hostPath, containerName+":/home/sandcastle/.claude/"+dir).Run()
+				exec.Command("docker", "exec", "--user", "root", containerName,
+					"chown", "-R", "sandcastle:sandcastle", "/home/sandcastle/.claude/"+dir).Run()
+			}
+		}
+
+		// Patch installed_plugins.json to rewrite host project paths to /workspace/
+		pluginPatch := fmt.Sprintf(`python3 -c "
+import json, os
+p = '/home/sandcastle/.claude/plugins/installed_plugins.json'
+if not os.path.exists(p):
+    exit(0)
+d = json.load(open(p))
+for name, installs in d.get('plugins', {}).items():
+    for inst in installs:
+        pp = inst.get('projectPath', '')
+        if pp == '%s' or pp.startswith('%s/'):
+            inst['projectPath'] = '/workspace' + pp[%d:]
+json.dump(d, open(p, 'w'))
+"`, m.projectDir, m.projectDir, len(m.projectDir))
+		exec.Command("docker", "exec", containerName, "bash", "-c", pluginPatch).Run()
+
+		// Create a symlink from the host's ~/.claude to the container's so that
+		// absolute paths in plugin metadata (installPath) resolve correctly,
+		// even if Claude Code rewrites the file after our patches.
+		hostClaude := home + "/.claude"
+		if hostClaude != "/home/sandcastle/.claude" {
+			exec.Command("docker", "exec", "--user", "root", containerName,
+				"bash", "-c", fmt.Sprintf("mkdir -p %s && ln -sfn /home/sandcastle/.claude %s", home, hostClaude)).Run()
 		}
 	}
 
@@ -404,6 +449,51 @@ func (m *Manager) DestroyAll() {
 	for _, name := range names {
 		m.Destroy(name)
 	}
+}
+
+// Merge merges a sandbox's branch into the current branch of the main repo.
+// It first commits any uncommitted changes in the worktree.
+func (m *Manager) Merge(name string) (string, error) {
+	m.mu.Lock()
+	sb, ok := m.state.Sandboxes[name]
+	m.mu.Unlock()
+
+	if !ok {
+		return "", fmt.Errorf("sandcastle %q not found", name)
+	}
+
+	// Commit any uncommitted changes in the worktree
+	statusOut, _ := exec.Command("git", "-C", sb.WorktreePath, "status", "--porcelain").CombinedOutput()
+	if len(strings.TrimSpace(string(statusOut))) > 0 {
+		exec.Command("git", "-C", sb.WorktreePath, "add", "-A").Run()
+		exec.Command("git", "-C", sb.WorktreePath, "commit", "-m",
+			fmt.Sprintf("WIP from sandcastle %s", name)).Run()
+	}
+
+	// Count commits on the branch that aren't on the current main branch
+	currentBranch, _ := exec.Command("git", "-C", m.projectDir, "rev-parse", "--abbrev-ref", "HEAD").CombinedOutput()
+	branch := strings.TrimSpace(string(currentBranch))
+	logOut, _ := exec.Command("git", "-C", m.projectDir, "log", "--oneline",
+		fmt.Sprintf("%s..%s", branch, sb.Branch)).CombinedOutput()
+	commits := strings.TrimSpace(string(logOut))
+	if commits == "" {
+		return fmt.Sprintf("[%s] Nothing to merge — no new commits on %s", name, sb.Branch), nil
+	}
+
+	commitCount := len(strings.Split(commits, "\n"))
+
+	// Merge the branch
+	out, err := exec.Command("git", "-C", m.projectDir, "merge", sb.Branch,
+		"-m", fmt.Sprintf("Merge sandcastle %s", name)).CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("%s", strings.TrimSpace(string(out)))
+	}
+
+	noun := "commits"
+	if commitCount == 1 {
+		noun = "commit"
+	}
+	return fmt.Sprintf("[%s] Merged %d %s from %s into %s", name, commitCount, noun, sb.Branch, branch), nil
 }
 
 func (m *Manager) imageName() string {

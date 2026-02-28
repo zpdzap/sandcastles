@@ -31,7 +31,7 @@ type model struct {
 
 func newModel(mgr *sandbox.Manager, cfg *config.Config) model {
 	ti := textinput.New()
-	ti.Placeholder = "start <name> [task], stop <name>, connect <name>, diff <name>, quit"
+	ti.Placeholder = "start, stop, connect, diff, merge <name> | quit"
 	ti.CharLimit = 256
 	ti.Width = 80
 	// Input starts unfocused — activated by pressing /
