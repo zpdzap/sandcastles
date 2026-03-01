@@ -39,6 +39,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.bellInit[sb.Name] = true
 			}
 
+			// Skip polling when a user is attached — our exec calls cause flicker
+			clientOut, _ := exec.Command("docker", "exec", containerName,
+				"tmux", "list-clients", "-t", "main").CombinedOutput()
+			if strings.Contains(string(clientOut), "attached") {
+				continue
+			}
+
 			// Capture pane output for preview
 			out, err := exec.Command("docker", "exec", containerName,
 				"tmux", "capture-pane", "-t", "main", "-p", "-S", "-30").CombinedOutput()
