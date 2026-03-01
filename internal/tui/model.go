@@ -22,7 +22,6 @@ type model struct {
 	isError    bool
 	commanding bool // true when in command mode (/ pressed)
 	quitting   bool
-	connectTo  string // sandbox name to connect to after tea quits
 	width      int
 	height     int
 	progressName  string  // name of sandbox being created
@@ -43,7 +42,7 @@ type model struct {
 	confirmStopName string
 }
 
-func newModel(mgr *sandbox.Manager, cfg *config.Config, recentlyAttached string) model {
+func newModel(mgr *sandbox.Manager, cfg *config.Config) model {
 	ti := textinput.New()
 	ti.Placeholder = "start, stop, connect, diff, merge <name> | quit"
 	ti.CharLimit = 256
@@ -71,13 +70,6 @@ func newModel(mgr *sandbox.Manager, cfg *config.Config, recentlyAttached string)
 		agentStates: make(map[string]string),
 		bellInit:    make(map[string]bool),
 		attachedAt:  make(map[string]time.Time),
-	}
-
-	// If we just detached from a sandbox, pre-seed attachedAt so the first
-	// few ticks don't poll it (the user may reconnect quickly, and the
-	// list-clients check itself causes flicker).
-	if recentlyAttached != "" {
-		m.attachedAt[recentlyAttached] = time.Now()
 	}
 
 	return m

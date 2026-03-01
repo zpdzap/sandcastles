@@ -110,6 +110,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.attachedAt = make(map[string]time.Time)
 		return m, tea.ClearScreen
 
+	case attachFinishedMsg:
+		// User detached from tmux — suppress polling briefly to avoid flicker
+		m.attachedAt[msg.name] = time.Now()
+		return m, tea.ClearScreen
+
 	case confirmStopExpiredMsg:
 		m.confirmStop = false
 		m.confirmStopName = ""
@@ -266,8 +271,11 @@ func (m model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		sandboxes := m.manager.List()
 		if m.cursor < len(sandboxes) {
-			m.connectTo = sandboxes[m.cursor].Name
-			return m, tea.Quit
+			name := sandboxes[m.cursor].Name
+			cmd := m.manager.ConnectCmd(name)
+			return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
+				return attachFinishedMsg{name: name}
+			})
 		}
 		return m, nil
 	}
@@ -393,8 +401,11 @@ func (m model) processInput() (tea.Model, tea.Cmd) {
 			m.isError = true
 			return m, nil
 		}
-		m.connectTo = parts[1]
-		return m, tea.Quit
+		name := parts[1]
+		cmd := m.manager.ConnectCmd(name)
+		return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
+			return attachFinishedMsg{name: name}
+		})
 
 	case "diff":
 		if len(parts) < 2 {
