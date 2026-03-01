@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -71,6 +72,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.cursor = 0
 		return m, tea.ClearScreen
 
+	case confirmStopExpiredMsg:
+		m.confirmStop = false
+		m.confirmStopName = ""
+		return m, nil
+
 	case tea.KeyMsg:
 		if m.commanding {
 			return m.handleCommandMode(msg)
@@ -89,6 +95,38 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // handleNormalMode handles keys when navigating the sandcastle list.
 func (m model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Dismiss help modal
+	if m.showHelp {
+		if msg.String() == "?" || msg.String() == "esc" {
+			m.showHelp = false
+			return m, nil
+		}
+		// While help is showing, ignore other keys
+		if msg.String() == "ctrl+c" || msg.String() == "q" {
+			m.quitting = true
+			return m, tea.Quit
+		}
+		return m, nil
+	}
+
+	// If confirming a stop, second x confirms, anything else cancels
+	if m.confirmStop {
+		m.confirmStop = false
+		if msg.String() == "x" {
+			name := m.confirmStopName
+			m.confirmStopName = ""
+			m.manager.MarkStopping(name)
+			m.message = fmt.Sprintf("Stopping sandcastle %s...", name)
+			m.isError = false
+			return m, func() tea.Msg {
+				m.manager.Destroy(name)
+				return sandboxDestroyedMsg{name: name}
+			}
+		}
+		m.confirmStopName = ""
+		return m, nil
+	}
+
 	switch msg.String() {
 	case "ctrl+c", "q":
 		m.quitting = true
@@ -99,6 +137,61 @@ func (m model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.input.Focus()
 		m.input.SetValue("")
 		return m, textinput.Blink
+
+	case "s":
+		m.commanding = true
+		m.input.Focus()
+		m.input.SetValue("start ")
+		m.input.SetCursor(6)
+		return m, textinput.Blink
+
+	case "x":
+		sandboxes := m.manager.List()
+		if m.cursor < len(sandboxes) {
+			m.confirmStop = true
+			m.confirmStopName = sandboxes[m.cursor].Name
+			return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+				return confirmStopExpiredMsg{}
+			})
+		}
+		return m, nil
+
+	case "d":
+		sandboxes := m.manager.List()
+		if m.cursor < len(sandboxes) {
+			sb := sandboxes[m.cursor]
+			out, err := exec.Command("git", "-C", sb.WorktreePath, "diff").CombinedOutput()
+			if err != nil {
+				m.message = fmt.Sprintf("diff error: %v", err)
+				m.isError = true
+			} else if len(out) == 0 {
+				m.message = fmt.Sprintf("[%s] No changes yet", sb.Name)
+				m.isError = false
+			} else {
+				m.message = fmt.Sprintf("[%s diff]\n%s", sb.Name, string(out))
+				m.isError = false
+			}
+		}
+		return m, nil
+
+	case "m":
+		sandboxes := m.manager.List()
+		if m.cursor < len(sandboxes) {
+			name := sandboxes[m.cursor].Name
+			result, err := m.manager.Merge(name)
+			if err != nil {
+				m.message = fmt.Sprintf("Merge failed: %v", err)
+				m.isError = true
+			} else {
+				m.message = result
+				m.isError = false
+			}
+		}
+		return m, nil
+
+	case "?":
+		m.showHelp = !m.showHelp
+		return m, nil
 
 	case "up", "k":
 		sandboxes := m.manager.List()
