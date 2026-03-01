@@ -44,12 +44,6 @@ var (
 	stateDone    = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
 
 	// Help modal
-	helpStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("#FFD700")).
-			Padding(1, 2).
-			Foreground(lipgloss.Color("#FFFFFF"))
-
 	helpHeaderStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FFD700")).
 			Bold(true)

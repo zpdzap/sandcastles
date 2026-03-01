@@ -56,7 +56,10 @@ func (m model) renderEmptyState(header string) string {
 	// Status message
 	m.renderStatusAndInput(&b)
 
-	// Help overlay
+	// Modal overlays
+	if m.showDiff {
+		return m.renderModalOverlay(b.String(), m.diffContent, lipgloss.Color("#5599FF"))
+	}
 	if m.showHelp {
 		return m.renderHelpOverlay(b.String())
 	}
@@ -123,12 +126,16 @@ func (m model) renderSplitView(header string, sandboxes []*sandbox.Sandbox) stri
 	// Status message and input
 	m.renderStatusAndInput(&b)
 
-	// Help overlay
+	// Modal overlays
+	base := b.String()
+	if m.showDiff {
+		return m.renderModalOverlay(base, m.diffContent, lipgloss.Color("#5599FF"))
+	}
 	if m.showHelp {
-		return m.renderHelpOverlay(b.String())
+		return m.renderHelpOverlay(base)
 	}
 
-	return b.String()
+	return base
 }
 
 // renderColumn renders a single sandbox column: header line + preview content.
@@ -266,30 +273,32 @@ func (m model) renderHelpOverlay(base string) string {
 		helpKeyStyle.Render("  q") + helpDescStyle.Render("  quit") + "     " + helpKeyStyle.Render("?") + helpDescStyle.Render("  close this help"),
 	}, "\n")
 
-	modal := helpStyle.Render(help)
+	return m.renderModalOverlay(base, help, lipgloss.Color("#FFD700"))
+}
 
-	// Center the modal over the base view
+// renderModalOverlay centers styled content over the base view.
+func (m model) renderModalOverlay(base, content string, borderColor lipgloss.Color) string {
+	style := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(borderColor).
+		Padding(1, 2).
+		Foreground(lipgloss.Color("#FFFFFF"))
+
+	modal := style.Render(content)
+
 	modalWidth := lipgloss.Width(modal)
 	modalHeight := lipgloss.Height(modal)
 
 	baseLines := strings.Split(base, "\n")
 
-	// Calculate offsets
 	xOffset := max(0, (m.width-modalWidth)/2)
 	yOffset := max(0, (m.height-modalHeight)/2)
 
-	// Overlay modal onto base
 	modalLines := strings.Split(modal, "\n")
 	for i, mLine := range modalLines {
 		row := yOffset + i
 		if row < len(baseLines) {
-			baseLine := baseLines[row]
-			// Replace the portion of the base line with the modal line
 			padding := strings.Repeat(" ", xOffset)
-			// Ensure base line is wide enough
-			for lipgloss.Width(baseLine) < m.width {
-				baseLine += " "
-			}
 			baseLines[row] = padding + mLine + strings.Repeat(" ", max(0, m.width-xOffset-lipgloss.Width(mLine)))
 		}
 	}

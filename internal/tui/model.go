@@ -34,8 +34,10 @@ type model struct {
 	bellInit    map[string]bool      // sandboxes where monitor-bell has been enabled
 	attachedAt  map[string]time.Time // last time a client was detected attached
 
-	// Help modal
-	showHelp bool
+	// Modals
+	showHelp    bool
+	showDiff    bool
+	diffContent string // rendered diff tree
 
 	// Double-press stop confirmation
 	confirmStop     bool

@@ -138,13 +138,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // handleNormalMode handles keys when navigating the sandcastle list.
 func (m model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// Dismiss help modal
+	// Dismiss modals
 	if m.showHelp {
 		if msg.String() == "?" || msg.String() == "esc" {
 			m.showHelp = false
 			return m, nil
 		}
-		// While help is showing, ignore other keys
+		if msg.String() == "ctrl+c" || msg.String() == "q" {
+			m.quitting = true
+			return m, tea.Quit
+		}
+		return m, nil
+	}
+	if m.showDiff {
+		if msg.String() == "d" || msg.String() == "esc" {
+			m.showDiff = false
+			m.diffContent = ""
+			return m, nil
+		}
 		if msg.String() == "ctrl+c" || msg.String() == "q" {
 			m.quitting = true
 			return m, tea.Quit
@@ -203,24 +214,14 @@ func (m model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		sandboxes := m.manager.List()
 		if m.cursor < len(sandboxes) {
 			sb := sandboxes[m.cursor]
-			// Check if there are changes first
-			out, err := exec.Command("git", "-C", sb.WorktreePath, "diff", "--stat").CombinedOutput()
+			tree, err := buildDiffTree(sb.WorktreePath, sb.Name)
 			if err != nil {
 				m.message = fmt.Sprintf("diff error: %v", err)
 				m.isError = true
-				return m, nil
+			} else {
+				m.diffContent = tree
+				m.showDiff = true
 			}
-			if len(strings.TrimSpace(string(out))) == 0 {
-				m.message = fmt.Sprintf("[%s] No changes yet", sb.Name)
-				m.isError = false
-				return m, nil
-			}
-			// Hand off to git diff with color piped through less
-			cmd := exec.Command("bash", "-c",
-				fmt.Sprintf("git -C %q diff --color=always | less -R", sb.WorktreePath))
-			return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
-				return attachFinishedMsg{name: sb.Name}
-			})
 		}
 		return m, nil
 
@@ -427,22 +428,15 @@ func (m model) processInput() (tea.Model, tea.Cmd) {
 			m.isError = true
 			return m, nil
 		}
-		out, err := exec.Command("git", "-C", sb.WorktreePath, "diff", "--stat").CombinedOutput()
+		tree, err := buildDiffTree(sb.WorktreePath, name)
 		if err != nil {
 			m.message = fmt.Sprintf("diff error: %v", err)
 			m.isError = true
-			return m, nil
+		} else {
+			m.diffContent = tree
+			m.showDiff = true
 		}
-		if len(strings.TrimSpace(string(out))) == 0 {
-			m.message = fmt.Sprintf("[%s] No changes yet", name)
-			m.isError = false
-			return m, nil
-		}
-		cmd := exec.Command("bash", "-c",
-			fmt.Sprintf("git -C %q diff --color=always | less -R", sb.WorktreePath))
-		return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
-			return attachFinishedMsg{name: name}
-		})
+		return m, nil
 
 	case "merge":
 		if len(parts) < 2 {
