@@ -25,18 +25,32 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case statusTickMsg:
 		m.manager.RefreshStatuses()
-		// Poll tmux output from each running sandbox
+		// Poll tmux output and bell flag from each running sandbox
 		for _, sb := range m.manager.List() {
 			if sb.Status != sandbox.StatusRunning {
 				continue
 			}
 			containerName := fmt.Sprintf("sc-%s", sb.Name)
+
+			// Enable monitor-bell once per sandbox so tmux tracks BEL signals
+			if !m.bellInit[sb.Name] {
+				exec.Command("docker", "exec", containerName,
+					"tmux", "set-option", "-t", "main", "monitor-bell", "on").Run()
+				m.bellInit[sb.Name] = true
+			}
+
+			// Capture pane output for preview
 			out, err := exec.Command("docker", "exec", containerName,
 				"tmux", "capture-pane", "-t", "main", "-p", "-S", "-30").CombinedOutput()
-			if err == nil {
-				m.previews[sb.Name] = string(out)
-				m.agentStates[sb.Name] = detectAgentState(string(out))
+			if err != nil {
+				continue
 			}
+			output := string(out)
+			prevOutput := m.previews[sb.Name]
+			m.previews[sb.Name] = output
+
+			// Detect agent state: output change + bell flag
+			m.agentStates[sb.Name] = detectAgentState(containerName, output, prevOutput)
 		}
 		// Pick up progress updates from the background create goroutine
 		if m.progressPhase != nil && *m.progressPhase != "" {
@@ -62,6 +76,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.isError = false
 		delete(m.previews, msg.name)
 		delete(m.agentStates, msg.name)
+		delete(m.bellInit, msg.name)
 		sandboxes := m.manager.List()
 		if m.cursor >= len(sandboxes) && m.cursor > 0 {
 			m.cursor--
@@ -74,6 +89,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.cursor = 0
 		m.previews = make(map[string]string)
 		m.agentStates = make(map[string]string)
+		m.bellInit = make(map[string]bool)
 		return m, tea.ClearScreen
 
 	case confirmStopExpiredMsg:
@@ -432,55 +448,44 @@ func (m model) processInput() (tea.Model, tea.Cmd) {
 	}
 }
 
-// detectAgentState infers the agent's state from tmux pane output.
+// detectAgentState infers the agent's state from tmux bell flag and output changes.
 // Returns "working", "waiting", or "done".
 //
-// Claude Code's TUI always shows the ❯ prompt, even while the agent is
-// actively working. The reliable signals are status lines above the prompt:
+// Claude Code sends a terminal bell (BEL, \x07) when it finishes a turn and
+// is waiting for user input. tmux tracks this as window_bell_flag. This is
+// the same signal that makes iTerm play a notification chime.
 //
-//   * Musing…           → working (agent is thinking)
-//   ● Tool(...)         → working (agent is running a tool)
-//   ✻ Churned for ...   → waiting (agent finished, idle at prompt)
-//   Enter to select ... → waiting (AskUserQuestion UI)
-//   $ (last line)       → done (back at shell)
-func detectAgentState(output string) string {
+// The bell flag stays set until a client selects the window (which never
+// happens since nobody is attached). So we combine it with output-change
+// detection:
+//
+//  1. Shell prompt ($) on last non-empty line → "done"
+//  2. Output changed since last tick → "working" (agent is producing output)
+//  3. Output unchanged AND bell flag set → "waiting"
+//  4. Otherwise → "working"
+func detectAgentState(containerName, output, prevOutput string) string {
+	// Check for shell prompt — agent has exited
 	lines := strings.Split(strings.TrimRight(output, "\n"), "\n")
-
-	// Collect last N non-empty lines for scanning
-	var recent []string
-	for i := len(lines) - 1; i >= 0 && len(recent) < 15; i-- {
+	for i := len(lines) - 1; i >= 0; i-- {
 		trimmed := strings.TrimSpace(lines[i])
 		if trimmed != "" {
-			recent = append(recent, trimmed)
+			if strings.HasSuffix(trimmed, "$") || strings.HasSuffix(trimmed, "$ ") {
+				return "done"
+			}
+			break
 		}
 	}
 
-	if len(recent) == 0 {
+	// If output changed since last tick, agent is actively working
+	if output != prevOutput {
 		return "working"
 	}
 
-	// Check for shell prompt on the very last non-empty line — agent has exited
-	last := recent[0]
-	if strings.HasSuffix(last, "$") || strings.HasSuffix(last, "$ ") {
-		return "done"
-	}
-
-	// Scan recent lines for activity/waiting indicators
-	for _, line := range recent {
-		// Active work indicators — agent is busy
-		if strings.HasPrefix(line, "* ") || strings.HasPrefix(line, "● ") {
-			return "working"
-		}
-
-		// Idle indicator — agent finished and is waiting at prompt
-		if strings.HasPrefix(line, "✻ ") {
-			return "waiting"
-		}
-
-		// AskUserQuestion navigation hint
-		if strings.Contains(line, "Enter to select") && strings.Contains(line, "to navigate") {
-			return "waiting"
-		}
+	// Output is static — check if Claude sent a bell (waiting for input)
+	bellOut, err := exec.Command("docker", "exec", containerName,
+		"tmux", "display-message", "-t", "main", "-p", "#{window_bell_flag}").CombinedOutput()
+	if err == nil && strings.TrimSpace(string(bellOut)) == "1" {
+		return "waiting"
 	}
 
 	return "working"

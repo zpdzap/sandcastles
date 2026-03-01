@@ -31,6 +31,7 @@ type model struct {
 	// Split-pane preview
 	previews    map[string]string // cached tmux output per sandbox name
 	agentStates map[string]string // "working" / "waiting" / "done" per sandbox
+	bellInit    map[string]bool   // sandboxes where monitor-bell has been enabled
 
 	// Help modal
 	showHelp bool
@@ -66,6 +67,7 @@ func newModel(mgr *sandbox.Manager, cfg *config.Config) model {
 		quip:        quips[rand.Intn(len(quips))],
 		previews:    make(map[string]string),
 		agentStates: make(map[string]string),
+		bellInit:    make(map[string]bool),
 	}
 }
 
