@@ -39,12 +39,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.bellInit[sb.Name] = true
 			}
 
-			// Skip polling when a user is attached — our exec calls cause flicker
+			// Skip ALL docker exec calls when a client was recently attached.
+			// Even list-clients causes flicker during rapid output, so once we
+			// detect attachment we back off entirely for 10 seconds.
+			if t, ok := m.attachedAt[sb.Name]; ok && time.Since(t) < 10*time.Second {
+				continue
+			}
+
+			// Check if a user is attached — if so, cache and skip
 			clientOut, _ := exec.Command("docker", "exec", containerName,
 				"tmux", "list-clients", "-t", "main").CombinedOutput()
 			if strings.Contains(string(clientOut), "attached") {
+				m.attachedAt[sb.Name] = time.Now()
 				continue
 			}
+			delete(m.attachedAt, sb.Name)
 
 			// Capture pane output for preview
 			out, err := exec.Command("docker", "exec", containerName,
@@ -84,6 +93,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		delete(m.previews, msg.name)
 		delete(m.agentStates, msg.name)
 		delete(m.bellInit, msg.name)
+		delete(m.attachedAt, msg.name)
 		sandboxes := m.manager.List()
 		if m.cursor >= len(sandboxes) && m.cursor > 0 {
 			m.cursor--
@@ -97,6 +107,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.previews = make(map[string]string)
 		m.agentStates = make(map[string]string)
 		m.bellInit = make(map[string]bool)
+		m.attachedAt = make(map[string]time.Time)
 		return m, tea.ClearScreen
 
 	case confirmStopExpiredMsg:
