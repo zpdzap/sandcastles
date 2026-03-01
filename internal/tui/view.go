@@ -140,15 +140,15 @@ func (m model) renderColumn(index int, sb *sandbox.Sandbox, width, height int) s
 		hStyle = columnHeaderStyle
 	}
 
-	icon, iStyle := m.agentIcon(sb)
-	headerText := iStyle.Render(icon) + " " + sb.Name
+	icon, _ := m.agentIcon(sb)
+	headerText := icon + " " + sb.Name
 
 	if sb.Status == sandbox.StatusRunning {
 		switch m.agentStates[sb.Name] {
 		case "waiting":
-			headerText += " " + stateWaiting.Render("waiting")
+			headerText += " waiting"
 		case "done":
-			headerText += " " + stateDone.Render("done")
+			headerText += " done"
 		}
 	}
 
@@ -161,9 +161,9 @@ func (m model) renderColumn(index int, sb *sandbox.Sandbox, width, height int) s
 	for _, container := range portKeys {
 		host := sb.Ports[container]
 		if container == host {
-			headerText += " " + portStyle.Render(":"+container)
+			headerText += " :" + container
 		} else {
-			headerText += " " + portStyle.Render(":"+container+"→:"+host)
+			headerText += " :" + container + "→:" + host
 		}
 	}
 
