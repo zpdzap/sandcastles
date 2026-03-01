@@ -86,10 +86,7 @@ func (m model) renderSplitView(header string, sandboxes []*sandbox.Sandbox) stri
 	if m.commanding {
 		footerLines++
 	}
-	previewHeight := m.height - 1 - len(sandboxes) - 1 - 1 - footerLines
-	if previewHeight < 3 {
-		previewHeight = 3
-	}
+	previewHeight := max(3, m.height-1-len(sandboxes)-1-1-footerLines)
 
 	b.WriteString(m.renderPreview(sandboxes, previewHeight))
 
@@ -300,14 +297,8 @@ func (m model) renderHelpOverlay(base string) string {
 	baseLines := strings.Split(base, "\n")
 
 	// Calculate offsets
-	xOffset := (m.width - modalWidth) / 2
-	if xOffset < 0 {
-		xOffset = 0
-	}
-	yOffset := (m.height - modalHeight) / 2
-	if yOffset < 0 {
-		yOffset = 0
-	}
+	xOffset := max(0, (m.width-modalWidth)/2)
+	yOffset := max(0, (m.height-modalHeight)/2)
 
 	// Overlay modal onto base
 	modalLines := strings.Split(modal, "\n")

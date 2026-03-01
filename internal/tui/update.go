@@ -60,6 +60,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case sandboxDestroyedMsg:
 		m.message = fmt.Sprintf("Destroyed sandcastle: %s", msg.name)
 		m.isError = false
+		delete(m.previews, msg.name)
+		delete(m.agentStates, msg.name)
 		sandboxes := m.manager.List()
 		if m.cursor >= len(sandboxes) && m.cursor > 0 {
 			m.cursor--
@@ -70,6 +72,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.message = fmt.Sprintf("Destroyed %d sandcastles", msg.count)
 		m.isError = false
 		m.cursor = 0
+		m.previews = make(map[string]string)
+		m.agentStates = make(map[string]string)
 		return m, tea.ClearScreen
 
 	case confirmStopExpiredMsg:

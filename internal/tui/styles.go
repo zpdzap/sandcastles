@@ -9,10 +9,6 @@ var (
 			Background(lipgloss.Color("#1a1a2e")).
 			Padding(0, 2)
 
-	statsStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#888888")).
-			Padding(0, 2)
-
 	dividerStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#333333"))
 
@@ -26,9 +22,6 @@ var (
 	selectedNameStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#FFD700")).
 				Bold(true)
-
-	taskStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#888888"))
 
 	portStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#5599FF"))
@@ -49,7 +42,6 @@ var (
 			Foreground(lipgloss.Color("#8B7500")).
 			Background(lipgloss.Color("#1a1a2e"))
 
-	statusRunning = lipgloss.NewStyle().Foreground(lipgloss.Color("#00FF00"))
 	statusStopped = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000"))
 	statusOther   = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFAA00"))
 
