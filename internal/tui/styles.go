@@ -16,13 +16,6 @@ var (
 			Foreground(lipgloss.Color("#555555")).
 			Padding(1, 2)
 
-	nameStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FFFFFF"))
-
-	selectedNameStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#FFD700")).
-				Bold(true)
-
 	portStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#5599FF"))
 
@@ -50,15 +43,6 @@ var (
 	stateWaiting = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFD700"))
 	stateDone    = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
 
-	// Preview pane
-	previewStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#AAAAAA")).
-			Padding(0, 2)
-
-	previewEmptyStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#555555")).
-			Padding(0, 2)
-
 	// Help modal
 	helpStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
@@ -80,4 +64,20 @@ var (
 	confirmStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FFAA00")).
 			Padding(0, 2)
+
+	// Column preview pane
+	columnBorder = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("#333333"))
+
+	columnBorderSelected = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color("#FFD700"))
+
+	columnHeaderStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("#FFFFFF"))
+
+	columnContentStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#888888"))
 )

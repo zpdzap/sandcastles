@@ -42,7 +42,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Skip ALL docker exec calls when a client was recently attached.
 			// Even list-clients causes flicker during rapid output, so once we
 			// detect attachment we back off entirely for 10 seconds.
-			if t, ok := m.attachedAt[sb.Name]; ok && time.Since(t) < 10*time.Second {
+			if t, ok := m.attachedAt[sb.Name]; ok && time.Since(t) < 4*time.Second {
 				continue
 			}
 

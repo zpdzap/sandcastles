@@ -71,28 +71,43 @@ func (m model) renderSplitView(header string, sandboxes []*sandbox.Sandbox) stri
 	b.WriteString(header)
 	b.WriteString("\n")
 
-	// Sandbox list — one line per sandbox
-	for i, sb := range sandboxes {
-		b.WriteString(m.renderSandbox(i, sb))
-		b.WriteString("\n")
+	// Calculate column dimensions
+	// Border adds 2 chars width (left+right) and 2 lines height (top+bottom)
+	colWidth := m.width / len(sandboxes)
+	if colWidth < 20 {
+		colWidth = 20
 	}
+	// Inner width after border
+	innerWidth := colWidth - 2
 
-	// Divider
-	b.WriteString(dividerStyle.Render(strings.Repeat("─", m.width)))
-	b.WriteString("\n")
-
-	// Preview pane — fill remaining vertical space
-	// Calculate available height: total - header(1) - sandboxes(N) - divider(1) - preview divider(1) - hotkeys(1) - divider(1) - status(1) - input(1 if commanding)
-	footerLines := 4 // hotkeys + divider + status + possible input
+	// Available height for columns: total - header(1) - hotkeys(1) - divider(1) - status(1) - possible input(1)
+	footerLines := 3
 	if m.commanding {
 		footerLines++
 	}
-	previewHeight := max(3, m.height-1-len(sandboxes)-1-1-footerLines)
+	if m.message != "" {
+		footerLines++
+	}
+	colHeight := max(5, m.height-1-footerLines)
+	// Inner height after border top/bottom
+	innerHeight := colHeight - 2
 
-	b.WriteString(m.renderPreview(sandboxes, previewHeight))
+	// Render each column
+	var columns []string
+	for i, sb := range sandboxes {
+		col := m.renderColumn(i, sb, innerWidth, innerHeight)
 
-	// Bottom divider
-	b.WriteString(dividerStyle.Render(strings.Repeat("─", m.width)))
+		// Pick border style based on selection
+		border := columnBorder
+		if i == m.cursor {
+			border = columnBorderSelected
+		}
+		styled := border.Width(innerWidth).Height(innerHeight).Render(col)
+		columns = append(columns, styled)
+	}
+
+	// Join columns horizontally
+	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, columns...))
 	b.WriteString("\n")
 
 	// Hotkeys
@@ -116,114 +131,72 @@ func (m model) renderSplitView(header string, sandboxes []*sandbox.Sandbox) stri
 	return b.String()
 }
 
-func (m model) renderPreview(sandboxes []*sandbox.Sandbox, height int) string {
-	var b strings.Builder
-
-	// Get the selected sandbox
-	if m.cursor >= len(sandboxes) {
-		b.WriteString(previewEmptyStyle.Render("No sandbox selected"))
-		b.WriteString("\n")
-		for i := 1; i < height; i++ {
-			b.WriteString("\n")
-		}
-		return b.String()
-	}
-
-	selected := sandboxes[m.cursor]
-
-	// If creating, show progress phase
-	if selected.Status == sandbox.StatusCreating || (m.progressName == selected.Name && m.progressPhase != nil) {
-		phase := "Starting..."
-		if m.progressPhase != nil && *m.progressPhase != "" {
-			phase = *m.progressPhase
-		}
-		b.WriteString(previewEmptyStyle.Render(fmt.Sprintf("[%s] %s", selected.Name, phase)))
-		b.WriteString("\n")
-		for i := 1; i < height; i++ {
-			b.WriteString("\n")
-		}
-		return b.String()
-	}
-
-	// Show tmux preview
-	preview, ok := m.previews[selected.Name]
-	if !ok || strings.TrimSpace(preview) == "" {
-		b.WriteString(previewEmptyStyle.Render("Waiting for output..."))
-		b.WriteString("\n")
-		for i := 1; i < height; i++ {
-			b.WriteString("\n")
-		}
-		return b.String()
-	}
-
-	// Take last N lines to fit the preview height
-	lines := strings.Split(strings.TrimRight(preview, "\n"), "\n")
-	if len(lines) > height {
-		lines = lines[len(lines)-height:]
-	}
-
-	for _, line := range lines {
-		// Truncate lines to terminal width (rune/ANSI-aware)
-		if lipgloss.Width(line) > m.width-4 {
-			line = ansi.Truncate(line, m.width-4, "")
-		}
-		b.WriteString(previewStyle.Render(line))
-		b.WriteString("\n")
-	}
-
-	// Pad remaining lines
-	for i := len(lines); i < height; i++ {
-		b.WriteString("\n")
-	}
-
-	return b.String()
-}
-
-func (m model) renderSandbox(index int, sb *sandbox.Sandbox) string {
-	cursor := "  "
-	nStyle := nameStyle
-	if index == m.cursor {
-		cursor = "▸ "
-		nStyle = selectedNameStyle
-	}
-
-	// Agent state icon (overrides container status for running containers)
+// renderColumn renders a single sandbox column: header line + preview content.
+func (m model) renderColumn(index int, sb *sandbox.Sandbox, width, height int) string {
+	// Header: icon + name (+ state label)
 	icon, iStyle := m.agentIcon(sb)
-	status := iStyle.Render(icon)
-	name := nStyle.Render(sb.Name)
+	header := iStyle.Render(icon) + " " + columnHeaderStyle.Render(sb.Name)
 
-	var parts []string
-	parts = append(parts, fmt.Sprintf("  %s%s %s", cursor, status, name))
-
-	// Agent state label for running containers
 	if sb.Status == sandbox.StatusRunning {
-		state := m.agentStates[sb.Name]
-		switch state {
+		switch m.agentStates[sb.Name] {
 		case "waiting":
-			parts = append(parts, stateWaiting.Render("waiting"))
+			header += " " + stateWaiting.Render("waiting")
 		case "done":
-			parts = append(parts, stateDone.Render("done"))
-		default:
-			// Don't show "working" label — the green icon is enough
+			header += " " + stateDone.Render("done")
 		}
 	}
 
-	// Show port mappings (sorted for stable display)
+	// Port mappings
 	portKeys := make([]string, 0, len(sb.Ports))
 	for k := range sb.Ports {
 		portKeys = append(portKeys, k)
 	}
 	sort.Strings(portKeys)
+	var ports []string
 	for _, container := range portKeys {
 		host := sb.Ports[container]
 		if container == host {
-			parts = append(parts, portStyle.Render(fmt.Sprintf(":%s", container)))
+			ports = append(ports, portStyle.Render(":"+container))
 		} else {
-			parts = append(parts, portStyle.Render(fmt.Sprintf(":%s→:%s", container, host)))
+			ports = append(ports, portStyle.Render(":"+container+"→:"+host))
 		}
 	}
+	if len(ports) > 0 {
+		header += " " + strings.Join(ports, " ")
+	}
 
-	return strings.Join(parts, "  ")
+	header = ansi.Truncate(header, width, "")
+
+	// Preview content — fills remaining height below header
+	contentHeight := height - 1 // 1 line for header
+	if contentHeight < 1 {
+		contentHeight = 1
+	}
+
+	var content string
+
+	// Creating state
+	if sb.Status == sandbox.StatusCreating || (m.progressName == sb.Name && m.progressPhase != nil) {
+		phase := "Starting..."
+		if m.progressPhase != nil && *m.progressPhase != "" {
+			phase = *m.progressPhase
+		}
+		content = columnContentStyle.Render(phase)
+	} else if preview, ok := m.previews[sb.Name]; ok && strings.TrimSpace(preview) != "" {
+		// Show last N lines of tmux output
+		lines := strings.Split(strings.TrimRight(preview, "\n"), "\n")
+		if len(lines) > contentHeight {
+			lines = lines[len(lines)-contentHeight:]
+		}
+		for i, line := range lines {
+			lines[i] = ansi.Truncate(line, width, "")
+		}
+		content = columnContentStyle.Render(strings.Join(lines, "\n"))
+	} else {
+		content = columnContentStyle.Render("Waiting for output...")
+	}
+
+	return header + "\n" + content
 }
 
 // agentIcon returns the status icon and style for a sandbox.
