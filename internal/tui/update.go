@@ -250,7 +250,7 @@ func (m model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.showHelp = !m.showHelp
 		return m, nil
 
-	case "up", "k":
+	case "left", "h":
 		sandboxes := m.manager.List()
 		if m.cursor > 0 {
 			m.cursor--
@@ -259,7 +259,7 @@ func (m model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case "down", "j":
+	case "right", "l":
 		sandboxes := m.manager.List()
 		if m.cursor < len(sandboxes)-1 {
 			m.cursor++

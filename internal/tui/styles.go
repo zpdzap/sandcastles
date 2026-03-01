@@ -68,7 +68,7 @@ var (
 	// Column preview pane
 	columnBorder = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("#333333"))
+			BorderForeground(lipgloss.Color("#555555"))
 
 	columnBorderSelected = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
@@ -76,7 +76,15 @@ var (
 
 	columnHeaderStyle = lipgloss.NewStyle().
 				Bold(true).
-				Foreground(lipgloss.Color("#FFFFFF"))
+				Foreground(lipgloss.Color("#FFD700")).
+				Background(lipgloss.Color("#2a2a3e")).
+				Padding(0, 1)
+
+	columnHeaderDimStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("#7B68EE")).
+				Background(lipgloss.Color("#1a1a2e")).
+				Padding(0, 1)
 
 	columnContentStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#888888"))

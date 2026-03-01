@@ -116,7 +116,7 @@ func (m model) renderSplitView(header string, sandboxes []*sandbox.Sandbox) stri
 	} else if m.confirmStop {
 		b.WriteString(confirmStyle.Render(fmt.Sprintf("Stop %s? Press x again to confirm, any other key to cancel", m.confirmStopName)))
 	} else {
-		b.WriteString(hotkeysStyle.Render("[↑↓] select  [enter] connect  [s]tart  [x] stop  [d]iff  [m]erge  [r]efresh  [?] help"))
+		b.WriteString(hotkeysStyle.Render("[←→] select  [enter] connect  [s]tart  [x] stop  [d]iff  [m]erge  [r]efresh  [?] help"))
 	}
 	b.WriteString("\n")
 
@@ -133,16 +133,22 @@ func (m model) renderSplitView(header string, sandboxes []*sandbox.Sandbox) stri
 
 // renderColumn renders a single sandbox column: header line + preview content.
 func (m model) renderColumn(index int, sb *sandbox.Sandbox, width, height int) string {
-	// Header: icon + name (+ state label)
+	// Header: icon + name (+ state label + ports)
+	selected := index == m.cursor
+	hStyle := columnHeaderDimStyle
+	if selected {
+		hStyle = columnHeaderStyle
+	}
+
 	icon, iStyle := m.agentIcon(sb)
-	header := iStyle.Render(icon) + " " + columnHeaderStyle.Render(sb.Name)
+	headerText := iStyle.Render(icon) + " " + sb.Name
 
 	if sb.Status == sandbox.StatusRunning {
 		switch m.agentStates[sb.Name] {
 		case "waiting":
-			header += " " + stateWaiting.Render("waiting")
+			headerText += " " + stateWaiting.Render("waiting")
 		case "done":
-			header += " " + stateDone.Render("done")
+			headerText += " " + stateDone.Render("done")
 		}
 	}
 
@@ -152,20 +158,16 @@ func (m model) renderColumn(index int, sb *sandbox.Sandbox, width, height int) s
 		portKeys = append(portKeys, k)
 	}
 	sort.Strings(portKeys)
-	var ports []string
 	for _, container := range portKeys {
 		host := sb.Ports[container]
 		if container == host {
-			ports = append(ports, portStyle.Render(":"+container))
+			headerText += " " + portStyle.Render(":"+container)
 		} else {
-			ports = append(ports, portStyle.Render(":"+container+"→:"+host))
+			headerText += " " + portStyle.Render(":"+container+"→:"+host)
 		}
 	}
-	if len(ports) > 0 {
-		header += " " + strings.Join(ports, " ")
-	}
 
-	header = ansi.Truncate(header, width, "")
+	header := hStyle.Width(width).Render(ansi.Truncate(headerText, width-2, ""))
 
 	// Preview content — fills remaining height below header
 	contentHeight := height - 1 // 1 line for header
@@ -242,7 +244,7 @@ func (m model) renderStatusAndInput(b *strings.Builder) {
 func (m model) renderHelpOverlay(base string) string {
 	help := strings.Join([]string{
 		helpHeaderStyle.Render("Navigation"),
-		helpKeyStyle.Render("  ↑/k  ↓/j") + helpDescStyle.Render("   Select sandbox"),
+		helpKeyStyle.Render("  ←/h  →/l") + helpDescStyle.Render("   Select sandbox"),
 		helpKeyStyle.Render("  Enter") + helpDescStyle.Render("       Connect (tmux attach)"),
 		"",
 		helpHeaderStyle.Render("Actions"),
