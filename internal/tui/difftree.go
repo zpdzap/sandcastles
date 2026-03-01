@@ -41,25 +41,30 @@ func newDirNode(name string) *dirNode {
 	return &dirNode{name: name, children: make(map[string]*dirNode)}
 }
 
-// buildDiffTree runs git commands and returns a rendered file tree string.
-func buildDiffTree(worktreePath, sandboxName string) (string, error) {
+// containerGit runs a git command inside the sandbox container.
+func containerGit(containerName string, args ...string) ([]byte, error) {
+	dockerArgs := []string{"exec", containerName, "git"}
+	dockerArgs = append(dockerArgs, args...)
+	return exec.Command("docker", dockerArgs...).Output()
+}
+
+// buildDiffTree runs git commands inside the container and returns a rendered file tree string.
+func buildDiffTree(_ string, sandboxName string) (string, error) {
+	containerName := fmt.Sprintf("sc-%s", sandboxName)
+
 	// 1. Count commits on this branch
-	commitOut, _ := exec.Command("git", "-C", worktreePath,
-		"rev-list", "--count", "main..HEAD").CombinedOutput()
+	commitOut, _ := containerGit(containerName, "rev-list", "--count", "main..HEAD")
 	commitCount, _ := strconv.Atoi(strings.TrimSpace(string(commitOut)))
 
 	// 2. Committed changes: diff main..HEAD (what merge will apply)
-	committedStatus, err := exec.Command("git", "-C", worktreePath,
-		"diff", "--name-status", "main..HEAD").CombinedOutput()
+	committedStatus, err := containerGit(containerName, "diff", "--name-status", "main..HEAD")
 	if err != nil {
 		return "", fmt.Errorf("git diff main..HEAD: %w", err)
 	}
-	committedNumstat, _ := exec.Command("git", "-C", worktreePath,
-		"diff", "--numstat", "main..HEAD").CombinedOutput()
+	committedNumstat, _ := containerGit(containerName, "diff", "--numstat", "main..HEAD")
 
-	// 3. Working tree status for uncommitted changes
-	porcelainOut, _ := exec.Command("git", "-C", worktreePath,
-		"status", "--porcelain").Output() // Output() not CombinedOutput() to avoid stderr
+	// 3. Working tree status for uncommitted changes (as the agent sees them)
+	porcelainOut, _ := containerGit(containerName, "status", "--porcelain")
 
 	// Build entries map
 	entries := make(map[string]*diffEntry)
