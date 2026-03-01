@@ -541,7 +541,9 @@ func (m *Manager) Merge(name string) (string, error) {
 	out, err := exec.Command("git", "-C", m.projectDir, "merge", sb.Branch,
 		"-m", fmt.Sprintf("Merge sandcastle %s", name)).CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("%s", strings.TrimSpace(string(out)))
+		// Abort the failed merge to leave the repo clean
+		exec.Command("git", "-C", m.projectDir, "merge", "--abort").Run()
+		return "", fmt.Errorf("merge conflict — aborted automatically.\n%s", strings.TrimSpace(string(out)))
 	}
 
 	noun := "commits"
