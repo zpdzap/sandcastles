@@ -12,8 +12,10 @@ import (
 // Run starts the main TUI loop. It cycles between the Bubble Tea dashboard
 // and subprocess connections (tmux attach) until the user quits.
 func Run(mgr *sandbox.Manager, cfg *config.Config) error {
+	var recentlyAttached string
 	for {
-		m := newModel(mgr, cfg)
+		m := newModel(mgr, cfg, recentlyAttached)
+		recentlyAttached = ""
 		p := tea.NewProgram(m, tea.WithAltScreen())
 		result, err := p.Run()
 		if err != nil {
@@ -36,6 +38,10 @@ func Run(mgr *sandbox.Manager, cfg *config.Config) error {
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
 			cmd.Run()
+
+			// Remember which sandbox we just detached from so the next TUI
+			// session skips polling it for a few seconds (avoids flicker).
+			recentlyAttached = final.connectTo
 
 			// Reset terminal after tmux detach so Bubble Tea starts clean
 			fmt.Print("\033c") // full terminal reset (RIS)

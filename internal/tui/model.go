@@ -43,7 +43,7 @@ type model struct {
 	confirmStopName string
 }
 
-func newModel(mgr *sandbox.Manager, cfg *config.Config) model {
+func newModel(mgr *sandbox.Manager, cfg *config.Config, recentlyAttached string) model {
 	ti := textinput.New()
 	ti.Placeholder = "start, stop, connect, diff, merge <name> | quit"
 	ti.CharLimit = 256
@@ -60,7 +60,7 @@ func newModel(mgr *sandbox.Manager, cfg *config.Config) model {
 		h = 24
 	}
 
-	return model{
+	m := model{
 		manager:     mgr,
 		cfg:         cfg,
 		input:       ti,
@@ -72,6 +72,15 @@ func newModel(mgr *sandbox.Manager, cfg *config.Config) model {
 		bellInit:    make(map[string]bool),
 		attachedAt:  make(map[string]time.Time),
 	}
+
+	// If we just detached from a sandbox, pre-seed attachedAt so the first
+	// few ticks don't poll it (the user may reconnect quickly, and the
+	// list-clients check itself causes flicker).
+	if recentlyAttached != "" {
+		m.attachedAt[recentlyAttached] = time.Now()
+	}
+
+	return m
 }
 
 func (m model) Init() tea.Cmd {
