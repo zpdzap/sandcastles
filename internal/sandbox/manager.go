@@ -471,6 +471,38 @@ func (m *Manager) DestroyAll() {
 	}
 }
 
+// RefreshCredentials re-copies ~/.claude/.credentials.json from the host into a running container.
+func (m *Manager) RefreshCredentials(name string) error {
+	m.mu.Lock()
+	sb, ok := m.state.Sandboxes[name]
+	m.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("sandcastle %q not found", name)
+	}
+	if sb.Status != StatusRunning {
+		return fmt.Errorf("sandcastle %q is not running", name)
+	}
+
+	home, _ := os.UserHomeDir()
+	hostPath := home + "/.claude/.credentials.json"
+	if _, err := os.Stat(hostPath); err != nil {
+		return fmt.Errorf("no credentials file found at %s", hostPath)
+	}
+
+	containerName := fmt.Sprintf("sc-%s", name)
+	containerPath := "/home/sandcastle/.claude/.credentials.json"
+
+	if out, err := exec.Command("docker", "cp", hostPath, containerName+":"+containerPath).CombinedOutput(); err != nil {
+		return fmt.Errorf("docker cp failed: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	if out, err := exec.Command("docker", "exec", "--user", "root", containerName,
+		"chown", "sandcastle:sandcastle", containerPath).CombinedOutput(); err != nil {
+		return fmt.Errorf("chown failed: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+
+	return nil
+}
+
 // Merge merges a sandbox's branch into the current branch of the main repo.
 // It first commits any uncommitted changes in the worktree.
 func (m *Manager) Merge(name string) (string, error) {

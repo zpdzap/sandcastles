@@ -193,6 +193,20 @@ func (m model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case "r":
+		sandboxes := m.manager.List()
+		if m.cursor < len(sandboxes) {
+			name := sandboxes[m.cursor].Name
+			if err := m.manager.RefreshCredentials(name); err != nil {
+				m.message = fmt.Sprintf("Refresh failed: %v", err)
+				m.isError = true
+			} else {
+				m.message = fmt.Sprintf("[%s] Credentials refreshed", name)
+				m.isError = false
+			}
+		}
+		return m, nil
+
 	case "?":
 		m.showHelp = !m.showHelp
 		return m, nil
@@ -387,6 +401,22 @@ func (m model) processInput() (tea.Model, tea.Cmd) {
 			m.isError = true
 		} else {
 			m.message = result
+			m.isError = false
+		}
+		return m, nil
+
+	case "refresh":
+		if len(parts) < 2 {
+			m.message = "Usage: /refresh <name>"
+			m.isError = true
+			return m, nil
+		}
+		name := parts[1]
+		if err := m.manager.RefreshCredentials(name); err != nil {
+			m.message = fmt.Sprintf("Refresh failed: %v", err)
+			m.isError = true
+		} else {
+			m.message = fmt.Sprintf("[%s] Credentials refreshed", name)
 			m.isError = false
 		}
 		return m, nil

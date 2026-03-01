@@ -101,7 +101,7 @@ func (m model) renderSplitView(header string, sandboxes []*sandbox.Sandbox) stri
 	} else if m.confirmStop {
 		b.WriteString(confirmStyle.Render(fmt.Sprintf("Stop %s? Press x again to confirm, any other key to cancel", m.confirmStopName)))
 	} else {
-		b.WriteString(hotkeysStyle.Render("[↑↓] select  [enter] connect  [s]tart  [x] stop  [d]iff  [m]erge  [?] help"))
+		b.WriteString(hotkeysStyle.Render("[↑↓] select  [enter] connect  [s]tart  [x] stop  [d]iff  [m]erge  [r]efresh  [?] help"))
 	}
 	b.WriteString("\n")
 
@@ -277,6 +277,7 @@ func (m model) renderHelpOverlay(base string) string {
 		helpKeyStyle.Render("  x") + helpDescStyle.Render("           Stop selected sandbox"),
 		helpKeyStyle.Render("  d") + helpDescStyle.Render("           Diff selected sandbox"),
 		helpKeyStyle.Render("  m") + helpDescStyle.Render("           Merge selected sandbox"),
+		helpKeyStyle.Render("  r") + helpDescStyle.Render("           Refresh credentials"),
 		"",
 		helpHeaderStyle.Render("Commands"),
 		helpKeyStyle.Render("  /") + helpDescStyle.Render("           Open command bar"),
@@ -285,6 +286,7 @@ func (m model) renderHelpOverlay(base string) string {
 		helpDescStyle.Render("  /connect <name>"),
 		helpDescStyle.Render("  /diff <name>"),
 		helpDescStyle.Render("  /merge <name>"),
+		helpDescStyle.Render("  /refresh <name>"),
 		"",
 		helpKeyStyle.Render("  q") + helpDescStyle.Render("  quit") + "     " + helpKeyStyle.Render("?") + helpDescStyle.Render("  close this help"),
 	}, "\n")
