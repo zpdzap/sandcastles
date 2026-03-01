@@ -24,11 +24,11 @@ var (
 )
 
 type diffEntry struct {
-	path       string
-	status     string // "M", "A", "D", "R"
-	added      int
-	deleted    int
-	uncommitted bool // true if file has uncommitted changes (unstaged, untracked)
+	path        string
+	status      string // "M", "A", "D"
+	added       int
+	deleted     int
+	uncommitted string // "", "modified", "untracked", "deleted"
 }
 
 type dirNode struct {
@@ -46,10 +46,7 @@ func buildDiffTree(worktreePath, sandboxName string) (string, error) {
 	// 1. Count commits on this branch
 	commitOut, _ := exec.Command("git", "-C", worktreePath,
 		"rev-list", "--count", "main..HEAD").CombinedOutput()
-	commitCount := strings.TrimSpace(string(commitOut))
-	if commitCount == "" {
-		commitCount = "0"
-	}
+	commitCount, _ := strconv.Atoi(strings.TrimSpace(string(commitOut)))
 
 	// 2. Committed changes: diff main..HEAD (what merge will apply)
 	committedStatus, err := exec.Command("git", "-C", worktreePath,
@@ -62,19 +59,107 @@ func buildDiffTree(worktreePath, sandboxName string) (string, error) {
 
 	// 3. Working tree status for uncommitted changes
 	porcelainOut, _ := exec.Command("git", "-C", worktreePath,
-		"status", "--porcelain").CombinedOutput()
+		"status", "--porcelain").Output() // Output() not CombinedOutput() to avoid stderr
 
-	// Parse committed changes
-	entries := parseCommitted(string(committedStatus), string(committedNumstat))
+	// Build entries map
+	entries := make(map[string]*diffEntry)
 
-	// Overlay uncommitted changes
-	overlayUncommitted(entries, string(porcelainOut))
+	// Parse committed --name-status
+	for _, line := range strings.Split(strings.TrimSpace(string(committedStatus)), "\n") {
+		if line == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		status := fields[0][:1]
+		file := fields[len(fields)-1] // last field handles renames
+		entries[file] = &diffEntry{path: file, status: status}
+	}
+
+	// Parse committed --numstat
+	for _, line := range strings.Split(strings.TrimSpace(string(committedNumstat)), "\n") {
+		if line == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+		added, _ := strconv.Atoi(fields[0])
+		deleted, _ := strconv.Atoi(fields[1])
+		file := fields[2]
+		if e, ok := entries[file]; ok {
+			e.added = added
+			e.deleted = deleted
+		}
+	}
+
+	// Overlay porcelain status
+	for _, line := range strings.Split(strings.TrimSpace(string(porcelainOut)), "\n") {
+		if line == "" {
+			continue
+		}
+		// Porcelain format: "XY filename" — use Fields to robustly extract filename
+		// X = index status, Y = worktree status
+		if len(line) < 3 {
+			continue
+		}
+		x, y := line[0], line[1]
+		// Extract filename: everything after the "XY " prefix
+		// Use strings.Fields for robustness in case of extra whitespace
+		rest := strings.TrimSpace(line[2:])
+		if rest == "" {
+			continue
+		}
+		// Handle "old -> new" for renames
+		if idx := strings.Index(rest, " -> "); idx >= 0 {
+			rest = rest[idx+4:]
+		}
+		file := rest
+
+		switch {
+		case x == '?' && y == '?':
+			// Untracked file
+			if e, exists := entries[file]; exists {
+				e.uncommitted = "untracked"
+			} else {
+				entries[file] = &diffEntry{path: file, status: "A", uncommitted: "untracked"}
+			}
+
+		case y == 'D':
+			// Deleted in working tree
+			if e, exists := entries[file]; exists {
+				// File was in committed diff but now deleted locally
+				e.uncommitted = "deleted"
+			} else {
+				entries[file] = &diffEntry{path: file, status: "D", uncommitted: "deleted"}
+			}
+
+		case y == 'M' || x == 'M':
+			// Modified (staged or unstaged)
+			if e, exists := entries[file]; exists {
+				e.uncommitted = "modified"
+			} else {
+				entries[file] = &diffEntry{path: file, status: "M", uncommitted: "modified"}
+			}
+
+		case x == 'A':
+			// Staged addition
+			if e, exists := entries[file]; exists {
+				e.uncommitted = "modified"
+			} else {
+				entries[file] = &diffEntry{path: file, status: "A", uncommitted: "untracked"}
+			}
+		}
+	}
 
 	if len(entries) == 0 {
 		return fmt.Sprintf("[%s] No changes yet", sandboxName), nil
 	}
 
-	// Sort
+	// Sort files
 	sortedFiles := make([]string, 0, len(entries))
 	for f := range entries {
 		sortedFiles = append(sortedFiles, f)
@@ -96,23 +181,21 @@ func buildDiffTree(worktreePath, sandboxName string) (string, error) {
 		node.files = append(node.files, *e)
 	}
 
-	// Render header
+	// Render
 	var b strings.Builder
 	b.WriteString(diffHeaderStyle.Render(sandboxName))
-	n, _ := strconv.Atoi(commitCount)
-	b.WriteString(diffDimStyle.Render(fmt.Sprintf("  %d commit%s", n, plural(n))))
+	b.WriteString(diffDimStyle.Render(fmt.Sprintf("  %d commit%s", commitCount, plural(commitCount))))
 	b.WriteString("\n")
 
-	// Render tree
 	renderTree(&b, root, "")
 
-	// Summary line
+	// Summary
 	totalAdd, totalDel, fileCount, uncommittedCount := 0, 0, 0, 0
 	for _, e := range entries {
 		totalAdd += e.added
 		totalDel += e.deleted
 		fileCount++
-		if e.uncommitted {
+		if e.uncommitted != "" {
 			uncommittedCount++
 		}
 	}
@@ -128,105 +211,20 @@ func buildDiffTree(worktreePath, sandboxName string) (string, error) {
 
 	if uncommittedCount > 0 {
 		b.WriteString("\n")
-		b.WriteString(diffWarnStyle.Render(fmt.Sprintf("⚠ %d file%s with uncommitted changes",
-			uncommittedCount, plural(uncommittedCount))))
+		b.WriteString(diffWarnStyle.Render(fmt.Sprintf(
+			"⚠ %d file%s with uncommitted changes", uncommittedCount, plural(uncommittedCount))))
 	}
 
 	return b.String(), nil
 }
 
-// parseCommitted parses git diff --name-status and --numstat output.
-func parseCommitted(statusStr, numstatStr string) map[string]*diffEntry {
-	entries := make(map[string]*diffEntry)
-
-	for _, line := range strings.Split(strings.TrimSpace(statusStr), "\n") {
-		if line == "" {
-			continue
-		}
-		parts := strings.Fields(line)
-		if len(parts) >= 2 {
-			status := parts[0][:1]
-			file := parts[len(parts)-1]
-			entries[file] = &diffEntry{path: file, status: status}
-		}
-	}
-
-	for _, line := range strings.Split(strings.TrimSpace(numstatStr), "\n") {
-		if line == "" {
-			continue
-		}
-		parts := strings.Fields(line)
-		if len(parts) >= 3 {
-			added, _ := strconv.Atoi(parts[0])
-			deleted, _ := strconv.Atoi(parts[1])
-			file := parts[2]
-			if e, ok := entries[file]; ok {
-				e.added = added
-				e.deleted = deleted
-			}
-		}
-	}
-
-	return entries
-}
-
-// overlayUncommitted adds uncommitted working tree changes on top of committed entries.
-func overlayUncommitted(entries map[string]*diffEntry, porcelainStr string) {
-	for _, line := range strings.Split(strings.TrimSpace(porcelainStr), "\n") {
-		if len(line) < 3 {
-			continue
-		}
-		x, y := line[0], line[1]
-		file := strings.TrimSpace(line[3:])
-
-		if x == '?' && y == '?' {
-			// Untracked file — not committed, needs attention
-			if _, exists := entries[file]; !exists {
-				entries[file] = &diffEntry{
-					path:        file,
-					status:      "A",
-					uncommitted: true,
-				}
-			}
-			continue
-		}
-
-		if e, exists := entries[file]; exists {
-			// File is in committed diff AND has working tree changes
-			if y == 'M' || y == 'D' || x == 'M' || x == 'A' || x == 'D' {
-				e.uncommitted = true
-			}
-		} else {
-			// File NOT in committed diff but has working tree changes
-			var status string
-			switch {
-			case y == 'D' || x == 'D':
-				status = "D"
-			case y == 'M' || x == 'M':
-				status = "M"
-			case x == 'A':
-				status = "A"
-			default:
-				continue
-			}
-			entries[file] = &diffEntry{
-				path:        file,
-				status:      status,
-				uncommitted: true,
-			}
-		}
-	}
-}
-
 func renderTree(b *strings.Builder, node *dirNode, prefix string) {
-	// Collect and sort children
 	var dirNames []string
 	for name := range node.children {
 		dirNames = append(dirNames, name)
 	}
 	sort.Strings(dirNames)
 
-	// Build ordered items at this level: dirs first, then files
 	type item struct {
 		isDir bool
 		name  string
@@ -253,7 +251,6 @@ func renderTree(b *strings.Builder, node *dirNode, prefix string) {
 			b.WriteString(diffTreeStyle.Render(prefix+connector) + diffDirStyle.Render(it.name+"/") + "\n")
 			renderTree(b, node.children[it.name], prefix+childPrefix)
 		} else {
-			// Find the entry
 			var entry diffEntry
 			for _, f := range node.files {
 				parts := strings.Split(f.path, "/")
@@ -281,9 +278,14 @@ func renderFileEntry(b *strings.Builder, prefix string, entry diffEntry) {
 		badges = append(badges, diffDelFileStyle.Render("deleted"))
 	}
 
-	// Uncommitted warning
-	if entry.uncommitted {
-		badges = append(badges, diffWarnStyle.Render("uncommitted"))
+	// Uncommitted warning with detail
+	switch entry.uncommitted {
+	case "untracked":
+		badges = append(badges, diffWarnStyle.Render("⚠ untracked"))
+	case "deleted":
+		badges = append(badges, diffWarnStyle.Render("⚠ locally deleted"))
+	case "modified":
+		badges = append(badges, diffWarnStyle.Render("⚠ uncommitted changes"))
 	}
 
 	// Line counts
@@ -295,7 +297,6 @@ func renderFileEntry(b *strings.Builder, prefix string, entry diffEntry) {
 		counts = append(counts, diffDelStyle.Render(fmt.Sprintf("-%d", entry.deleted)))
 	}
 
-	// Build the line
 	parts := strings.Split(entry.path, "/")
 	fileName := parts[len(parts)-1]
 
