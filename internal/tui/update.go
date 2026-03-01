@@ -434,27 +434,43 @@ func (m model) processInput() (tea.Model, tea.Cmd) {
 
 // detectAgentState infers the agent's state from tmux pane output.
 // Returns "working", "waiting", or "done".
+//
+// We scan the last ~10 non-empty lines (not just the last one) because
+// Claude Code's UI puts chrome below the prompt: divider lines, token
+// counts, navigation hints for AskUserQuestion, etc.
 func detectAgentState(output string) string {
 	lines := strings.Split(strings.TrimRight(output, "\n"), "\n")
-	// Find last non-empty line
-	last := ""
-	for i := len(lines) - 1; i >= 0; i-- {
+
+	// Collect last N non-empty lines for scanning
+	var recent []string
+	for i := len(lines) - 1; i >= 0 && len(recent) < 10; i-- {
 		trimmed := strings.TrimSpace(lines[i])
 		if trimmed != "" {
-			last = trimmed
-			break
+			recent = append(recent, trimmed)
 		}
 	}
-	if last == "" {
+
+	if len(recent) == 0 {
 		return "working"
 	}
-	// Claude Code's prompt ends with ❯
-	if strings.HasSuffix(last, "❯") || strings.Contains(last, "❯ ") {
-		return "waiting"
-	}
-	// Shell prompt — agent has exited
+
+	// Check for shell prompt on the very last non-empty line — agent has exited
+	last := recent[0]
 	if strings.HasSuffix(last, "$") || strings.HasSuffix(last, "$ ") {
 		return "done"
 	}
+
+	// Scan recent lines for waiting indicators
+	for _, line := range recent {
+		// Claude Code's input prompt
+		if strings.HasPrefix(line, "❯") {
+			return "waiting"
+		}
+		// AskUserQuestion navigation hint
+		if strings.Contains(line, "Enter to select") && strings.Contains(line, "to navigate") {
+			return "waiting"
+		}
+	}
+
 	return "working"
 }
