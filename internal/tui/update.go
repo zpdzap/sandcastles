@@ -210,6 +210,8 @@ func (m model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		sandboxes := m.manager.List()
 		if m.cursor < len(sandboxes)-1 {
 			m.cursor++
+		} else if len(sandboxes) > 0 {
+			m.cursor = 0
 		}
 		return m, nil
 
