@@ -52,4 +52,40 @@ var (
 	statusRunning = lipgloss.NewStyle().Foreground(lipgloss.Color("#00FF00"))
 	statusStopped = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000"))
 	statusOther   = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFAA00"))
+
+	// Agent state labels
+	stateWorking = lipgloss.NewStyle().Foreground(lipgloss.Color("#00FF00"))
+	stateWaiting = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFD700"))
+	stateDone    = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
+
+	// Preview pane
+	previewStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#AAAAAA")).
+			Padding(0, 2)
+
+	previewEmptyStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#555555")).
+			Padding(0, 2)
+
+	// Help modal
+	helpStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("#FFD700")).
+			Padding(1, 2).
+			Foreground(lipgloss.Color("#FFFFFF"))
+
+	helpHeaderStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FFD700")).
+			Bold(true)
+
+	helpKeyStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#5599FF"))
+
+	helpDescStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#AAAAAA"))
+
+	// Confirmation
+	confirmStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FFAA00")).
+			Padding(0, 2)
 )
