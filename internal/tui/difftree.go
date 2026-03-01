@@ -42,9 +42,25 @@ func newDirNode(name string) *dirNode {
 }
 
 // containerGit runs a git command inside the sandbox container.
+// It detects nested worktrees and sets GIT_DIR/GIT_WORK_TREE accordingly.
 func containerGit(containerName string, args ...string) ([]byte, error) {
-	dockerArgs := []string{"exec", containerName, "git"}
-	dockerArgs = append(dockerArgs, args...)
+	// Check if the container has a nested worktree (agent created one inside)
+	// by looking for .worktrees/ directory
+	wtCheck, _ := exec.Command("docker", "exec", containerName,
+		"sh", "-c", "ls -d /workspace/.worktrees/*/ 2>/dev/null | head -1").Output()
+	wtPath := strings.TrimSpace(string(wtCheck))
+
+	var dockerArgs []string
+	if wtPath != "" {
+		// Nested worktree: use same GIT_DIR/GIT_WORK_TREE as the agent
+		gitCmd := fmt.Sprintf("GIT_DIR=/workspace/.git GIT_WORK_TREE=%s git %s",
+			wtPath, strings.Join(args, " "))
+		dockerArgs = []string{"exec", containerName, "bash", "-c", gitCmd}
+	} else {
+		// Normal: just run git from /workspace
+		dockerArgs = []string{"exec", containerName, "git", "-C", "/workspace"}
+		dockerArgs = append(dockerArgs, args...)
+	}
 	return exec.Command("docker", dockerArgs...).Output()
 }
 
