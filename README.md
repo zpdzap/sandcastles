@@ -2,6 +2,8 @@
 
 Orchestrate multiple AI coding agents in isolated Docker containers. Each agent gets its own git worktree volume-mounted into a container — full process/network isolation, but code changes visible in your IDE in real-time.
 
+![sandcastles TUI](docs/sandcastles-ui.png)
+
 ## Install
 
 ```bash
@@ -55,7 +57,10 @@ sc
 
 Each sandcastle works on its own git branch (`sc-<name>`). When the agent's work is ready:
 
-1. `/diff <name>` — review changes from the TUI
+1. `/diff <name>` or press `d` — review changes from the TUI
+
+![diff tree view](docs/sandcastles-diff.png)
+
 2. `/merge <name>` — merges the branch into your current branch (auto-commits any uncommitted work in the worktree first)
 3. `/stop <name>` — cleans up the container, worktree, and branch
 
