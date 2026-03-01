@@ -488,5 +488,23 @@ func detectAgentState(containerName, output, prevOutput string) string {
 		return "waiting"
 	}
 
+	// Fallback: for containers that were already waiting before monitor-bell
+	// was enabled, the bell flag will be 0 even though the agent is idle.
+	// Scan recent lines for Claude Code UI patterns that indicate waiting.
+	for i := len(lines) - 1; i >= 0 && i >= len(lines)-10; i-- {
+		trimmed := strings.TrimSpace(lines[i])
+		if trimmed == "" {
+			continue
+		}
+		// AskUserQuestion / permission prompt
+		if strings.Contains(trimmed, "Enter to select") || strings.Contains(trimmed, "Esc to cancel") {
+			return "waiting"
+		}
+		// Idle indicator (✻ Churned for...)
+		if strings.HasPrefix(trimmed, "✻") {
+			return "waiting"
+		}
+	}
+
 	return "working"
 }

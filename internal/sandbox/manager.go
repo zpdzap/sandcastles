@@ -271,7 +271,8 @@ json.dump(d, open(p, 'w'))
 	tmuxSetup := fmt.Sprintf(
 		`tmux set -t main status-left " sandcastle: %s " && `+
 			`tmux set -t main status-right " ctrl-b d to exit " && `+
-			`tmux set -t main status-left-length 40`,
+			`tmux set -t main status-left-length 40 && `+
+			`tmux set -t main monitor-bell on`,
 		name,
 	)
 	exec.Command("docker", "exec", containerName, "bash", "-c", tmuxSetup).Run()
@@ -380,8 +381,10 @@ func (m *Manager) Reconcile() error {
 			changed = true
 		}
 
-		// Refresh port mappings for running containers
+		// Enable monitor-bell and refresh port mappings for running containers
 		if newStatus == StatusRunning {
+			exec.Command("docker", "exec", containerName,
+				"tmux", "set-option", "-t", "main", "monitor-bell", "on").Run()
 			if m.cfg.Defaults.IsHostNetwork() {
 				sb.Ports = m.identityPorts()
 			} else {
