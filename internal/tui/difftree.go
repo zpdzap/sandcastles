@@ -11,20 +11,24 @@ import (
 )
 
 var (
-	diffAddStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#00CC00"))
-	diffDelStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF4444"))
-	diffFileStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF"))
-	diffDirStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#5599FF")).Bold(true)
-	diffNewStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#00CC00")).Bold(true)
+	diffAddStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#00CC00"))
+	diffDelStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF4444"))
+	diffFileStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF"))
+	diffDirStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#5599FF")).Bold(true)
+	diffNewStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#00CC00")).Bold(true)
 	diffDelFileStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF4444")).Bold(true)
-	diffTreeStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
+	diffTreeStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
+	diffWarnStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFAA00")).Bold(true)
+	diffHeaderStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFD700"))
+	diffDimStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
 )
 
 type diffEntry struct {
-	path   string
-	status string // "M", "A", "D", "R"
-	added  int
-	deleted int
+	path       string
+	status     string // "M", "A", "D", "R"
+	added      int
+	deleted    int
+	uncommitted bool // true if file has uncommitted changes (unstaged, untracked)
 }
 
 type dirNode struct {
@@ -37,39 +41,50 @@ func newDirNode(name string) *dirNode {
 	return &dirNode{name: name, children: make(map[string]*dirNode)}
 }
 
-// buildDiffTree runs git diff and returns a rendered file tree string.
+// buildDiffTree runs git commands and returns a rendered file tree string.
 func buildDiffTree(worktreePath, sandboxName string) (string, error) {
-	// Find the merge base with main to show ALL changes on this branch
-	// (committed + uncommitted) rather than just unstaged edits.
-	mergeBase, err := exec.Command("git", "-C", worktreePath, "merge-base", "main", "HEAD").CombinedOutput()
-	if err != nil {
-		// Fallback to just HEAD if merge-base fails
-		mergeBase = []byte("HEAD")
-	}
-	base := strings.TrimSpace(string(mergeBase))
-
-	// Compare merge-base to working tree (committed + uncommitted changes)
-	statusOut, err := exec.Command("git", "-C", worktreePath, "diff", "--name-status", base).CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("git diff --name-status: %w", err)
+	// 1. Count commits on this branch
+	commitOut, _ := exec.Command("git", "-C", worktreePath,
+		"rev-list", "--count", "main..HEAD").CombinedOutput()
+	commitCount := strings.TrimSpace(string(commitOut))
+	if commitCount == "" {
+		commitCount = "0"
 	}
 
-	// Get line counts against same base
-	numstatOut, _ := exec.Command("git", "-C", worktreePath, "diff", "--numstat", base).CombinedOutput()
+	// 2. Committed changes: diff main..HEAD (what merge will apply)
+	committedStatus, err := exec.Command("git", "-C", worktreePath,
+		"diff", "--name-status", "main..HEAD").CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("git diff main..HEAD: %w", err)
+	}
+	committedNumstat, _ := exec.Command("git", "-C", worktreePath,
+		"diff", "--numstat", "main..HEAD").CombinedOutput()
 
-	// Working tree status for untracked/unstaged changes not in merge-base diff
-	porcelainOut, _ := exec.Command("git", "-C", worktreePath, "status", "--porcelain").CombinedOutput()
+	// 3. Working tree status for uncommitted changes
+	porcelainOut, _ := exec.Command("git", "-C", worktreePath,
+		"status", "--porcelain").CombinedOutput()
 
-	// Parse entries
-	entries := parseGitDiff(string(statusOut), string(numstatOut), string(porcelainOut))
+	// Parse committed changes
+	entries := parseCommitted(string(committedStatus), string(committedNumstat))
+
+	// Overlay uncommitted changes
+	overlayUncommitted(entries, string(porcelainOut))
 
 	if len(entries) == 0 {
 		return fmt.Sprintf("[%s] No changes yet", sandboxName), nil
 	}
 
+	// Sort
+	sortedFiles := make([]string, 0, len(entries))
+	for f := range entries {
+		sortedFiles = append(sortedFiles, f)
+	}
+	sort.Strings(sortedFiles)
+
 	// Build tree
 	root := newDirNode("")
-	for _, e := range entries {
+	for _, f := range sortedFiles {
+		e := entries[f]
 		parts := strings.Split(e.path, "/")
 		node := root
 		for _, dir := range parts[:len(parts)-1] {
@@ -78,21 +93,28 @@ func buildDiffTree(worktreePath, sandboxName string) (string, error) {
 			}
 			node = node.children[dir]
 		}
-		node.files = append(node.files, e)
+		node.files = append(node.files, *e)
 	}
 
-	// Render
+	// Render header
 	var b strings.Builder
-	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFD700")).Render(sandboxName))
+	b.WriteString(diffHeaderStyle.Render(sandboxName))
+	n, _ := strconv.Atoi(commitCount)
+	b.WriteString(diffDimStyle.Render(fmt.Sprintf("  %d commit%s", n, plural(n))))
 	b.WriteString("\n")
+
+	// Render tree
 	renderTree(&b, root, "")
 
-	// Summary
-	totalAdd, totalDel, fileCount := 0, 0, 0
+	// Summary line
+	totalAdd, totalDel, fileCount, uncommittedCount := 0, 0, 0, 0
 	for _, e := range entries {
 		totalAdd += e.added
 		totalDel += e.deleted
 		fileCount++
+		if e.uncommitted {
+			uncommittedCount++
+		}
 	}
 	b.WriteString("\n")
 	summary := fmt.Sprintf("%d file%s changed", fileCount, plural(fileCount))
@@ -104,26 +126,31 @@ func buildDiffTree(worktreePath, sandboxName string) (string, error) {
 	}
 	b.WriteString(summary)
 
+	if uncommittedCount > 0 {
+		b.WriteString("\n")
+		b.WriteString(diffWarnStyle.Render(fmt.Sprintf("⚠ %d file%s with uncommitted changes",
+			uncommittedCount, plural(uncommittedCount))))
+	}
+
 	return b.String(), nil
 }
 
-func parseGitDiff(statusStr, numstatStr, untrackedStr string) []diffEntry {
-	// Parse --name-status
-	statusMap := make(map[string]string)
+// parseCommitted parses git diff --name-status and --numstat output.
+func parseCommitted(statusStr, numstatStr string) map[string]*diffEntry {
+	entries := make(map[string]*diffEntry)
+
 	for _, line := range strings.Split(strings.TrimSpace(statusStr), "\n") {
 		if line == "" {
 			continue
 		}
 		parts := strings.Fields(line)
 		if len(parts) >= 2 {
-			status := parts[0][:1] // Take first char (R100 -> R)
-			file := parts[len(parts)-1] // For renames, take the new name
-			statusMap[file] = status
+			status := parts[0][:1]
+			file := parts[len(parts)-1]
+			entries[file] = &diffEntry{path: file, status: status}
 		}
 	}
 
-	// Parse --numstat
-	numMap := make(map[string][2]int) // [added, deleted]
 	for _, line := range strings.Split(strings.TrimSpace(numstatStr), "\n") {
 		if line == "" {
 			continue
@@ -133,70 +160,62 @@ func parseGitDiff(statusStr, numstatStr, untrackedStr string) []diffEntry {
 			added, _ := strconv.Atoi(parts[0])
 			deleted, _ := strconv.Atoi(parts[1])
 			file := parts[2]
-			numMap[file] = [2]int{added, deleted}
+			if e, ok := entries[file]; ok {
+				e.added = added
+				e.deleted = deleted
+			}
 		}
 	}
 
-	// Overlay working tree status (porcelain) to catch:
-	// - Untracked files (??) not in git at all
-	// - Unstaged modifications to files already on the branch
-	// - Files added on the branch but deleted in working tree
-	for _, line := range strings.Split(strings.TrimSpace(untrackedStr), "\n") {
+	return entries
+}
+
+// overlayUncommitted adds uncommitted working tree changes on top of committed entries.
+func overlayUncommitted(entries map[string]*diffEntry, porcelainStr string) {
+	for _, line := range strings.Split(strings.TrimSpace(porcelainStr), "\n") {
 		if len(line) < 3 {
 			continue
 		}
-		// Porcelain format: XY filename
-		// X = index status, Y = working tree status
 		x, y := line[0], line[1]
 		file := strings.TrimSpace(line[3:])
 
-		switch {
-		case x == '?' && y == '?':
-			// Untracked file — show as new
-			if _, exists := statusMap[file]; !exists {
-				statusMap[file] = "A"
+		if x == '?' && y == '?' {
+			// Untracked file — not committed, needs attention
+			if _, exists := entries[file]; !exists {
+				entries[file] = &diffEntry{
+					path:        file,
+					status:      "A",
+					uncommitted: true,
+				}
 			}
-		case y == 'D':
-			// Deleted in working tree
-			if _, exists := statusMap[file]; exists {
-				// Was in branch diff but now deleted — remove it
-				delete(statusMap, file)
-				delete(numMap, file)
-			} else {
-				statusMap[file] = "D"
+			continue
+		}
+
+		if e, exists := entries[file]; exists {
+			// File is in committed diff AND has working tree changes
+			if y == 'M' || y == 'D' || x == 'M' || x == 'A' || x == 'D' {
+				e.uncommitted = true
 			}
-		case y == 'M':
-			// Modified in working tree (unstaged)
-			if _, exists := statusMap[file]; !exists {
-				// Not in branch diff — file was committed on branch, then modified again
-				statusMap[file] = "M"
+		} else {
+			// File NOT in committed diff but has working tree changes
+			var status string
+			switch {
+			case y == 'D' || x == 'D':
+				status = "D"
+			case y == 'M' || x == 'M':
+				status = "M"
+			case x == 'A':
+				status = "A"
+			default:
+				continue
 			}
-			// If already in branch diff, the merge-base diff already captures the
-			// full difference (committed + unstaged) so no action needed
-		case x == 'M' || x == 'A' || x == 'D':
-			// Staged changes — similar handling
-			if _, exists := statusMap[file]; !exists {
-				statusMap[file] = string(x)
+			entries[file] = &diffEntry{
+				path:        file,
+				status:      status,
+				uncommitted: true,
 			}
 		}
 	}
-
-	// Merge into entries
-	var entries []diffEntry
-	for file, status := range statusMap {
-		nums := numMap[file]
-		entries = append(entries, diffEntry{
-			path:    file,
-			status:  status,
-			added:   nums[0],
-			deleted: nums[1],
-		})
-	}
-
-	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].path < entries[j].path
-	})
-	return entries
 }
 
 func renderTree(b *strings.Builder, node *dirNode, prefix string) {
@@ -207,26 +226,21 @@ func renderTree(b *strings.Builder, node *dirNode, prefix string) {
 	}
 	sort.Strings(dirNames)
 
-	// Total items at this level
-	items := make([]struct {
+	// Build ordered items at this level: dirs first, then files
+	type item struct {
 		isDir bool
 		name  string
-	}, 0, len(dirNames)+len(node.files))
+	}
+	items := make([]item, 0, len(dirNames)+len(node.files))
 	for _, d := range dirNames {
-		items = append(items, struct {
-			isDir bool
-			name  string
-		}{true, d})
+		items = append(items, item{true, d})
 	}
 	for _, f := range node.files {
 		parts := strings.Split(f.path, "/")
-		items = append(items, struct {
-			isDir bool
-			name  string
-		}{false, parts[len(parts)-1]})
+		items = append(items, item{false, parts[len(parts)-1]})
 	}
 
-	for i, item := range items {
+	for i, it := range items {
 		isLast := i == len(items)-1
 		connector := "├── "
 		childPrefix := "│   "
@@ -235,48 +249,64 @@ func renderTree(b *strings.Builder, node *dirNode, prefix string) {
 			childPrefix = "    "
 		}
 
-		if item.isDir {
-			b.WriteString(diffTreeStyle.Render(prefix+connector) + diffDirStyle.Render(item.name+"/") + "\n")
-			renderTree(b, node.children[item.name], prefix+childPrefix)
+		if it.isDir {
+			b.WriteString(diffTreeStyle.Render(prefix+connector) + diffDirStyle.Render(it.name+"/") + "\n")
+			renderTree(b, node.children[it.name], prefix+childPrefix)
 		} else {
-			// Find the entry for this file
+			// Find the entry
 			var entry diffEntry
 			for _, f := range node.files {
 				parts := strings.Split(f.path, "/")
-				if parts[len(parts)-1] == item.name {
+				if parts[len(parts)-1] == it.name {
 					entry = f
 					break
 				}
 			}
-
-			// Status indicator
-			var statusLabel string
-			nameStyle := diffFileStyle
-			switch entry.status {
-			case "A":
-				statusLabel = diffNewStyle.Render(" [new]")
-				nameStyle = diffNewStyle
-			case "D":
-				statusLabel = diffDelFileStyle.Render(" [deleted]")
-				nameStyle = diffDelFileStyle
-			}
-
-			// Line counts
-			var counts string
-			if entry.added > 0 || entry.deleted > 0 {
-				parts := []string{}
-				if entry.added > 0 {
-					parts = append(parts, diffAddStyle.Render(fmt.Sprintf("+%d", entry.added)))
-				}
-				if entry.deleted > 0 {
-					parts = append(parts, diffDelStyle.Render(fmt.Sprintf("-%d", entry.deleted)))
-				}
-				counts = " " + strings.Join(parts, " ")
-			}
-
-			b.WriteString(diffTreeStyle.Render(prefix+connector) + nameStyle.Render(item.name) + statusLabel + counts + "\n")
+			renderFileEntry(b, prefix+connector, entry)
 		}
 	}
+}
+
+func renderFileEntry(b *strings.Builder, prefix string, entry diffEntry) {
+	nameStyle := diffFileStyle
+	var badges []string
+
+	// File status badge
+	switch entry.status {
+	case "A":
+		nameStyle = diffNewStyle
+		badges = append(badges, diffNewStyle.Render("new"))
+	case "D":
+		nameStyle = diffDelFileStyle
+		badges = append(badges, diffDelFileStyle.Render("deleted"))
+	}
+
+	// Uncommitted warning
+	if entry.uncommitted {
+		badges = append(badges, diffWarnStyle.Render("uncommitted"))
+	}
+
+	// Line counts
+	var counts []string
+	if entry.added > 0 {
+		counts = append(counts, diffAddStyle.Render(fmt.Sprintf("+%d", entry.added)))
+	}
+	if entry.deleted > 0 {
+		counts = append(counts, diffDelStyle.Render(fmt.Sprintf("-%d", entry.deleted)))
+	}
+
+	// Build the line
+	parts := strings.Split(entry.path, "/")
+	fileName := parts[len(parts)-1]
+
+	line := diffTreeStyle.Render(prefix) + nameStyle.Render(fileName)
+	if len(badges) > 0 {
+		line += " " + strings.Join(badges, " ")
+	}
+	if len(counts) > 0 {
+		line += "  " + strings.Join(counts, " ")
+	}
+	b.WriteString(line + "\n")
 }
 
 func plural(n int) string {
