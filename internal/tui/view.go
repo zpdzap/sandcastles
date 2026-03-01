@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/zpdzap/sandcastles/internal/sandbox"
 )
 
@@ -162,9 +163,9 @@ func (m model) renderPreview(sandboxes []*sandbox.Sandbox, height int) string {
 	}
 
 	for _, line := range lines {
-		// Truncate lines to terminal width
+		// Truncate lines to terminal width (rune/ANSI-aware)
 		if lipgloss.Width(line) > m.width-4 {
-			line = line[:m.width-4]
+			line = ansi.Truncate(line, m.width-4, "")
 		}
 		b.WriteString(previewStyle.Render(line))
 		b.WriteString("\n")
