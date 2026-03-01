@@ -27,6 +27,17 @@ type model struct {
 	progressName  string  // name of sandbox being created
 	progressPhase *string // current phase (shared pointer so background goroutine updates are visible)
 	quip          string  // random phrase shown in header, constant per session
+
+	// Split-pane preview
+	previews    map[string]string // cached tmux output per sandbox name
+	agentStates map[string]string // "working" / "waiting" / "done" per sandbox
+
+	// Help modal
+	showHelp bool
+
+	// Double-press stop confirmation
+	confirmStop     bool
+	confirmStopName string
 }
 
 func newModel(mgr *sandbox.Manager, cfg *config.Config) model {
@@ -47,12 +58,14 @@ func newModel(mgr *sandbox.Manager, cfg *config.Config) model {
 	}
 
 	return model{
-		manager: mgr,
-		cfg:     cfg,
-		input:   ti,
-		width:   w,
-		height:  h,
-		quip:    quips[rand.Intn(len(quips))],
+		manager:     mgr,
+		cfg:         cfg,
+		input:       ti,
+		width:       w,
+		height:      h,
+		quip:        quips[rand.Intn(len(quips))],
+		previews:    make(map[string]string),
+		agentStates: make(map[string]string),
 	}
 }
 

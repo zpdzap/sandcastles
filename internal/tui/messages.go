@@ -25,6 +25,9 @@ type allDestroyedMsg struct {
 // statusTickMsg triggers a status refresh poll.
 type statusTickMsg time.Time
 
+// confirmStopExpiredMsg cancels a pending stop confirmation.
+type confirmStopExpiredMsg struct{}
+
 // tickCmd returns a command that sends a tick every 2 seconds.
 func tickCmd() tea.Cmd {
 	return tea.Tick(2*time.Second, func(t time.Time) tea.Msg {

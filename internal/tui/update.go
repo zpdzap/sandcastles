@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/zpdzap/sandcastles/internal/agent"
+	"github.com/zpdzap/sandcastles/internal/sandbox"
 )
 
 var validName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9-]*$`)
@@ -23,6 +24,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case statusTickMsg:
 		m.manager.RefreshStatuses()
+		// Poll tmux output from each running sandbox
+		for _, sb := range m.manager.List() {
+			if sb.Status != sandbox.StatusRunning {
+				continue
+			}
+			containerName := fmt.Sprintf("sc-%s", sb.Name)
+			out, err := exec.Command("docker", "exec", containerName,
+				"tmux", "capture-pane", "-t", "main", "-p", "-S", "-30").CombinedOutput()
+			if err == nil {
+				m.previews[sb.Name] = string(out)
+				m.agentStates[sb.Name] = detectAgentState(string(out))
+			}
+		}
 		// Pick up progress updates from the background create goroutine
 		if m.progressPhase != nil && *m.progressPhase != "" {
 			m.message = fmt.Sprintf("[%s] %s", m.progressName, *m.progressPhase)
@@ -287,4 +301,31 @@ func (m model) processInput() (tea.Model, tea.Cmd) {
 		m.isError = true
 		return m, nil
 	}
+}
+
+// detectAgentState infers the agent's state from tmux pane output.
+// Returns "working", "waiting", or "done".
+func detectAgentState(output string) string {
+	lines := strings.Split(strings.TrimRight(output, "\n"), "\n")
+	// Find last non-empty line
+	last := ""
+	for i := len(lines) - 1; i >= 0; i-- {
+		trimmed := strings.TrimSpace(lines[i])
+		if trimmed != "" {
+			last = trimmed
+			break
+		}
+	}
+	if last == "" {
+		return "working"
+	}
+	// Claude Code's prompt ends with ❯
+	if strings.HasSuffix(last, "❯") || strings.Contains(last, "❯ ") {
+		return "waiting"
+	}
+	// Shell prompt — agent has exited
+	if strings.HasSuffix(last, "$") || strings.HasSuffix(last, "$ ") {
+		return "done"
+	}
+	return "working"
 }
