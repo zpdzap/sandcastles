@@ -435,15 +435,20 @@ func (m model) processInput() (tea.Model, tea.Cmd) {
 // detectAgentState infers the agent's state from tmux pane output.
 // Returns "working", "waiting", or "done".
 //
-// We scan the last ~10 non-empty lines (not just the last one) because
-// Claude Code's UI puts chrome below the prompt: divider lines, token
-// counts, navigation hints for AskUserQuestion, etc.
+// Claude Code's TUI always shows the ❯ prompt, even while the agent is
+// actively working. The reliable signals are status lines above the prompt:
+//
+//   * Musing…           → working (agent is thinking)
+//   ● Tool(...)         → working (agent is running a tool)
+//   ✻ Churned for ...   → waiting (agent finished, idle at prompt)
+//   Enter to select ... → waiting (AskUserQuestion UI)
+//   $ (last line)       → done (back at shell)
 func detectAgentState(output string) string {
 	lines := strings.Split(strings.TrimRight(output, "\n"), "\n")
 
 	// Collect last N non-empty lines for scanning
 	var recent []string
-	for i := len(lines) - 1; i >= 0 && len(recent) < 10; i-- {
+	for i := len(lines) - 1; i >= 0 && len(recent) < 15; i-- {
 		trimmed := strings.TrimSpace(lines[i])
 		if trimmed != "" {
 			recent = append(recent, trimmed)
@@ -460,12 +465,18 @@ func detectAgentState(output string) string {
 		return "done"
 	}
 
-	// Scan recent lines for waiting indicators
+	// Scan recent lines for activity/waiting indicators
 	for _, line := range recent {
-		// Claude Code's input prompt
-		if strings.HasPrefix(line, "❯") {
+		// Active work indicators — agent is busy
+		if strings.HasPrefix(line, "* ") || strings.HasPrefix(line, "● ") {
+			return "working"
+		}
+
+		// Idle indicator — agent finished and is waiting at prompt
+		if strings.HasPrefix(line, "✻ ") {
 			return "waiting"
 		}
+
 		// AskUserQuestion navigation hint
 		if strings.Contains(line, "Enter to select") && strings.Contains(line, "to navigate") {
 			return "waiting"
