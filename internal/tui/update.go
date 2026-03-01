@@ -448,24 +448,18 @@ func (m model) processInput() (tea.Model, tea.Cmd) {
 	}
 }
 
-// detectAgentState infers the agent's state from tmux bell flag and output changes.
+// detectAgentState infers the agent's state from output changes and UI patterns.
 // Returns "working", "waiting", or "done".
 //
-// Claude Code sends a terminal bell (BEL, \x07) when it finishes a turn and
-// is waiting for user input. tmux tracks this as window_bell_flag. This is
-// the same signal that makes iTerm play a notification chime.
-//
-// The bell flag stays set until a client selects the window (which never
-// happens since nobody is attached). So we combine it with output-change
-// detection:
-//
+// Detection:
 //  1. Shell prompt ($) on last non-empty line → "done"
-//  2. Output changed since last tick → "working" (agent is producing output)
-//  3. Output unchanged AND bell flag set → "waiting"
+//  2. Output changed since last tick → "working" (agent producing output)
+//  3. Output stable + Claude UI shows idle/prompt patterns → "waiting"
 //  4. Otherwise → "working"
 func detectAgentState(containerName, output, prevOutput string) string {
-	// Check for shell prompt — agent has exited
 	lines := strings.Split(strings.TrimRight(output, "\n"), "\n")
+
+	// Check for shell prompt — agent has exited
 	for i := len(lines) - 1; i >= 0; i-- {
 		trimmed := strings.TrimSpace(lines[i])
 		if trimmed != "" {
@@ -477,31 +471,31 @@ func detectAgentState(containerName, output, prevOutput string) string {
 	}
 
 	// If output changed since last tick, agent is actively working
-	if output != prevOutput {
+	if output != prevOutput && prevOutput != "" {
 		return "working"
 	}
 
-	// Output is static — check if Claude sent a bell (waiting for input)
+	// Output is stable — check tmux bell flag (Claude sends BEL when idle)
 	bellOut, err := exec.Command("docker", "exec", containerName,
 		"tmux", "display-message", "-t", "main", "-p", "#{window_bell_flag}").CombinedOutput()
 	if err == nil && strings.TrimSpace(string(bellOut)) == "1" {
 		return "waiting"
 	}
 
-	// Fallback: for containers that were already waiting before monitor-bell
-	// was enabled, the bell flag will be 0 even though the agent is idle.
-	// Scan recent lines for Claude Code UI patterns that indicate waiting.
-	for i := len(lines) - 1; i >= 0 && i >= len(lines)-10; i-- {
+	// Scan recent lines for Claude Code UI patterns indicating idle/waiting.
+	// This catches cases where the bell was missed (e.g. monitor-bell wasn't
+	// enabled when the bell fired).
+	for i := len(lines) - 1; i >= 0 && i >= len(lines)-15; i-- {
 		trimmed := strings.TrimSpace(lines[i])
 		if trimmed == "" {
 			continue
 		}
-		// AskUserQuestion / permission prompt
-		if strings.Contains(trimmed, "Enter to select") || strings.Contains(trimmed, "Esc to cancel") {
+		// Idle indicator: ✻ (U+273B) — e.g. "✻ Churned for 2m 5s"
+		if strings.HasPrefix(trimmed, "\u273b") {
 			return "waiting"
 		}
-		// Idle indicator (✻ Churned for...)
-		if strings.HasPrefix(trimmed, "✻") {
+		// AskUserQuestion / permission prompts
+		if strings.Contains(trimmed, "Enter to select") || strings.Contains(trimmed, "Esc to cancel") {
 			return "waiting"
 		}
 	}
