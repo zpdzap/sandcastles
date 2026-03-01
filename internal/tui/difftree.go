@@ -39,8 +39,17 @@ func newDirNode(name string) *dirNode {
 
 // buildDiffTree runs git diff and returns a rendered file tree string.
 func buildDiffTree(worktreePath, sandboxName string) (string, error) {
-	// Get file statuses
-	statusOut, err := exec.Command("git", "-C", worktreePath, "diff", "--name-status").CombinedOutput()
+	// Find the merge base with main to show ALL changes on this branch
+	// (committed + uncommitted) rather than just unstaged edits.
+	mergeBase, err := exec.Command("git", "-C", worktreePath, "merge-base", "main", "HEAD").CombinedOutput()
+	if err != nil {
+		// Fallback to just HEAD if merge-base fails
+		mergeBase = []byte("HEAD")
+	}
+	base := strings.TrimSpace(string(mergeBase))
+
+	// Compare merge-base to working tree (includes committed + uncommitted changes)
+	statusOut, err := exec.Command("git", "-C", worktreePath, "diff", "--name-status", base).CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("git diff --name-status: %w", err)
 	}
@@ -48,8 +57,8 @@ func buildDiffTree(worktreePath, sandboxName string) (string, error) {
 		return fmt.Sprintf("[%s] No changes yet", sandboxName), nil
 	}
 
-	// Get line counts
-	numstatOut, _ := exec.Command("git", "-C", worktreePath, "diff", "--numstat").CombinedOutput()
+	// Get line counts against same base
+	numstatOut, _ := exec.Command("git", "-C", worktreePath, "diff", "--numstat", base).CombinedOutput()
 
 	// Also check for untracked (new) files via status
 	untrackedOut, _ := exec.Command("git", "-C", worktreePath, "status", "--porcelain").CombinedOutput()
