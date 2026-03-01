@@ -48,23 +48,24 @@ func buildDiffTree(worktreePath, sandboxName string) (string, error) {
 	}
 	base := strings.TrimSpace(string(mergeBase))
 
-	// Compare merge-base to working tree (includes committed + uncommitted changes)
+	// Compare merge-base to working tree (committed + uncommitted changes)
 	statusOut, err := exec.Command("git", "-C", worktreePath, "diff", "--name-status", base).CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("git diff --name-status: %w", err)
-	}
-	if len(strings.TrimSpace(string(statusOut))) == 0 {
-		return fmt.Sprintf("[%s] No changes yet", sandboxName), nil
 	}
 
 	// Get line counts against same base
 	numstatOut, _ := exec.Command("git", "-C", worktreePath, "diff", "--numstat", base).CombinedOutput()
 
-	// Also check for untracked (new) files via status
-	untrackedOut, _ := exec.Command("git", "-C", worktreePath, "status", "--porcelain").CombinedOutput()
+	// Working tree status for untracked/unstaged changes not in merge-base diff
+	porcelainOut, _ := exec.Command("git", "-C", worktreePath, "status", "--porcelain").CombinedOutput()
 
 	// Parse entries
-	entries := parseGitDiff(string(statusOut), string(numstatOut), string(untrackedOut))
+	entries := parseGitDiff(string(statusOut), string(numstatOut), string(porcelainOut))
+
+	if len(entries) == 0 {
+		return fmt.Sprintf("[%s] No changes yet", sandboxName), nil
+	}
 
 	// Build tree
 	root := newDirNode("")
@@ -136,16 +137,46 @@ func parseGitDiff(statusStr, numstatStr, untrackedStr string) []diffEntry {
 		}
 	}
 
-	// Parse untracked files from porcelain status
+	// Overlay working tree status (porcelain) to catch:
+	// - Untracked files (??) not in git at all
+	// - Unstaged modifications to files already on the branch
+	// - Files added on the branch but deleted in working tree
 	for _, line := range strings.Split(strings.TrimSpace(untrackedStr), "\n") {
 		if len(line) < 3 {
 			continue
 		}
-		code := line[:2]
-		file := strings.TrimSpace(line[2:])
-		if code == "??" {
+		// Porcelain format: XY filename
+		// X = index status, Y = working tree status
+		x, y := line[0], line[1]
+		file := strings.TrimSpace(line[3:])
+
+		switch {
+		case x == '?' && y == '?':
+			// Untracked file — show as new
 			if _, exists := statusMap[file]; !exists {
 				statusMap[file] = "A"
+			}
+		case y == 'D':
+			// Deleted in working tree
+			if _, exists := statusMap[file]; exists {
+				// Was in branch diff but now deleted — remove it
+				delete(statusMap, file)
+				delete(numMap, file)
+			} else {
+				statusMap[file] = "D"
+			}
+		case y == 'M':
+			// Modified in working tree (unstaged)
+			if _, exists := statusMap[file]; !exists {
+				// Not in branch diff — file was committed on branch, then modified again
+				statusMap[file] = "M"
+			}
+			// If already in branch diff, the merge-base diff already captures the
+			// full difference (committed + unstaged) so no action needed
+		case x == 'M' || x == 'A' || x == 'D':
+			// Staged changes — similar handling
+			if _, exists := statusMap[file]; !exists {
+				statusMap[file] = string(x)
 			}
 		}
 	}
