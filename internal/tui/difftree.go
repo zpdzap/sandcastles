@@ -57,11 +57,11 @@ func buildDiffTree(_ string, sandboxName string) (string, error) {
 	commitCount, _ := strconv.Atoi(strings.TrimSpace(string(commitOut)))
 
 	// 2. Committed changes: diff main..HEAD (what merge will apply)
-	committedStatus, err := containerGit(containerName, "diff", "--name-status", "main..HEAD")
+	committedStatus, err := containerGit(containerName, "diff", "--name-status", "main...HEAD")
 	if err != nil {
 		return "", fmt.Errorf("git diff main..HEAD: %w", err)
 	}
-	committedNumstat, _ := containerGit(containerName, "diff", "--numstat", "main..HEAD")
+	committedNumstat, _ := containerGit(containerName, "diff", "--numstat", "main...HEAD")
 
 	// 3. Working tree status for uncommitted changes (as the agent sees them)
 	porcelainOut, _ := containerGit(containerName, "status", "--porcelain")
