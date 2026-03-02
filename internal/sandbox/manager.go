@@ -1,9 +1,11 @@
 package sandbox
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -61,11 +63,15 @@ func (m *Manager) Create(name, task string, progress ProgressFunc) (*Sandbox, er
 		return nil, fmt.Errorf("creating worktree: %w", err)
 	}
 
-	// Build the Docker image
-	report("Building image (may take a minute on first run)...")
-	if err := m.buildImage(); err != nil {
-		worktree.Remove(m.projectDir, name)
-		return nil, fmt.Errorf("building image: %w", err)
+	// Build the Docker image (skip if Dockerfile unchanged and image exists)
+	if m.imageUpToDate() {
+		report("Image up to date, skipping build...")
+	} else {
+		report("Building image (may take a minute on first run)...")
+		if err := m.buildImage(); err != nil {
+			worktree.Remove(m.projectDir, name)
+			return nil, fmt.Errorf("building image: %w", err)
+		}
 	}
 
 	// Start container
@@ -136,85 +142,42 @@ func (m *Manager) Create(name, task string, progress ProgressFunc) (*Sandbox, er
 		containerID = containerID[:12]
 	}
 
-	// Copy claude config files into container (writable, owned by sandcastle user)
-	report("Configuring Claude Code...")
+	// Copy config files into container via batched operations.
+	report("Configuring environment...")
 	home, _ := os.UserHomeDir()
 
-	// Files inside ~/.claude/
-	claudeDirFiles := []string{
-		"settings.json",
-		".credentials.json",
-	}
-	// Ensure .claude dir exists in container
-	exec.Command("docker", "exec", containerName, "mkdir", "-p", "/home/sandcastle/.claude").Run()
-	for _, f := range claudeDirFiles {
-		hostPath := home + "/.claude/" + f
-		containerPath := "/home/sandcastle/.claude/" + f
-		if _, err := os.Stat(hostPath); err == nil {
-			exec.Command("docker", "cp", hostPath, containerName+":"+containerPath).Run()
-			exec.Command("docker", "exec", "--user", "root", containerName,
-				"chown", "sandcastle:sandcastle", containerPath).Run()
+	// Batch-copy from ~/.claude/ via tar (--dereference resolves symlinks
+	// which is important for skills/plugins that may be symlinked from other repos)
+	var tarItems []string
+	for _, f := range []string{"settings.json", ".credentials.json"} {
+		if _, err := os.Stat(filepath.Join(home, ".claude", f)); err == nil {
+			tarItems = append(tarItems, f)
 		}
 	}
-
-	// Copy skills and plugins when claude_env is enabled
 	if m.cfg.Defaults.ClaudeEnv {
-		report("Copying Claude environment (skills, plugins)...")
-		claudeDirs := []string{"skills", "plugins"}
-		for _, dir := range claudeDirs {
-			hostPath := home + "/.claude/" + dir
-			if info, err := os.Stat(hostPath); err == nil && info.IsDir() {
-				// Use tar with --dereference to resolve symlinks (e.g. skills
-				// symlinked from other repos) instead of docker cp which copies
-				// symlinks as-is, leaving them broken inside the container.
-				tarCmd := fmt.Sprintf("tar -chf - -C %s/.claude %s | docker exec -i %s tar -xf - -C /home/sandcastle/.claude",
-					home, dir, containerName)
-				if out, err := exec.Command("bash", "-c", tarCmd).CombinedOutput(); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: tar copy of %s failed: %s: %v\n", dir, strings.TrimSpace(string(out)), err)
-					// Fall back to docker cp (symlinks won't resolve but better than nothing)
-					exec.Command("docker", "cp", hostPath, containerName+":/home/sandcastle/.claude/"+dir).Run()
-				}
-				exec.Command("docker", "exec", "--user", "root", containerName,
-					"chown", "-R", "sandcastle:sandcastle", "/home/sandcastle/.claude/"+dir).Run()
+		for _, dir := range []string{"skills", "plugins"} {
+			if info, err := os.Stat(filepath.Join(home, ".claude", dir)); err == nil && info.IsDir() {
+				tarItems = append(tarItems, dir)
 			}
 		}
-
-		// Patch installed_plugins.json to rewrite host project paths to /workspace/
-		pluginPatch := fmt.Sprintf(`python3 -c "
-import json, os
-p = '/home/sandcastle/.claude/plugins/installed_plugins.json'
-if not os.path.exists(p):
-    exit(0)
-d = json.load(open(p))
-for name, installs in d.get('plugins', {}).items():
-    for inst in installs:
-        pp = inst.get('projectPath', '')
-        if pp == '%s' or pp.startswith('%s/'):
-            inst['projectPath'] = '/workspace' + pp[%d:]
-json.dump(d, open(p, 'w'))
-"`, m.projectDir, m.projectDir, len(m.projectDir))
-		exec.Command("docker", "exec", containerName, "bash", "-c", pluginPatch).Run()
-
-		// Create a symlink from the host's ~/.claude to the container's so that
-		// absolute paths in plugin metadata (installPath) resolve correctly,
-		// even if Claude Code rewrites the file after our patches.
-		hostClaude := home + "/.claude"
-		if hostClaude != "/home/sandcastle/.claude" {
-			exec.Command("docker", "exec", "--user", "root", containerName,
-				"bash", "-c", fmt.Sprintf("mkdir -p %s && ln -sfn /home/sandcastle/.claude %s", home, hostClaude)).Run()
-		}
+	}
+	if len(tarItems) > 0 {
+		tarPipe := fmt.Sprintf(
+			`tar -chf - -C %s/.claude %s | docker exec -i %s bash -c 'mkdir -p /home/sandcastle/.claude && tar -xf - -C /home/sandcastle/.claude'`,
+			home, strings.Join(tarItems, " "), containerName)
+		exec.Command("bash", "-c", tarPipe).Run()
 	}
 
-	// ~/.claude.json (preferences — lives at home root, not inside .claude/)
-	// Copy it, then patch to pre-trust /workspace and mark onboarding complete
-	claudeJSON := home + "/.claude.json"
+	// Copy .claude.json (lives at home root, not inside .claude/)
+	claudeJSON := filepath.Join(home, ".claude.json")
 	if _, err := os.Stat(claudeJSON); err == nil {
 		exec.Command("docker", "cp", claudeJSON, containerName+":/home/sandcastle/.claude.json").Run()
-		exec.Command("docker", "exec", "--user", "root", containerName,
-			"chown", "sandcastle:sandcastle", "/home/sandcastle/.claude.json").Run()
 	}
-	// Patch .claude.json to pre-trust /workspace and skip onboarding
-	patchScript := `python3 -c "
+
+	// Root setup script: patches, ownership, symlinks (single docker exec as root)
+	var rootScript strings.Builder
+
+	rootScript.WriteString(`python3 << 'PYEOF'
 import json, os
 p = '/home/sandcastle/.claude.json'
 try:
@@ -228,11 +191,10 @@ d.setdefault('projects', {})['/workspace'] = {
     'hasCompletedProjectOnboarding': True,
 }
 json.dump(d, open(p, 'w'))
-"`
-	exec.Command("docker", "exec", containerName, "bash", "-c", patchScript).Run()
+PYEOF
+`)
 
-	// Patch settings.json to default to bypass permissions (no interactive confirmation)
-	settingsPatch := `python3 -c "
+	rootScript.WriteString(`python3 << 'PYEOF'
 import json
 p = '/home/sandcastle/.claude/settings.json'
 try:
@@ -241,41 +203,60 @@ except:
     d = {}
 d['defaultMode'] = 'bypassPermissions'
 json.dump(d, open(p, 'w'))
-"`
-	exec.Command("docker", "exec", containerName, "bash", "-c", settingsPatch).Run()
+PYEOF
+`)
 
-	// Force git to use HTTPS for GitHub (no SSH key in container, SSH hangs)
-	exec.Command("docker", "exec", containerName, "git", "config", "--global",
-		"url.https://github.com/.insteadOf", "git@github.com:").Run()
+	if m.cfg.Defaults.ClaudeEnv {
+		rootScript.WriteString(fmt.Sprintf(`python3 << 'PYEOF'
+import json, os
+p = '/home/sandcastle/.claude/plugins/installed_plugins.json'
+if not os.path.exists(p):
+    exit(0)
+d = json.load(open(p))
+for name, installs in d.get('plugins', {}).items():
+    for inst in installs:
+        pp = inst.get('projectPath', '')
+        if pp == '%s' or pp.startswith('%s/'):
+            inst['projectPath'] = '/workspace' + pp[%d:]
+json.dump(d, open(p, 'w'))
+PYEOF
+`, m.projectDir, m.projectDir, len(m.projectDir)))
 
-	// Run post-create setup commands
-	if len(m.cfg.Defaults.Setup) > 0 {
-		report("Running setup commands...")
-		for _, cmd := range m.cfg.Defaults.Setup {
-			setupCmd := exec.Command("docker", "exec", containerName, "bash", "-c", cmd)
-			if out, err := setupCmd.CombinedOutput(); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: setup command %q failed: %s\n", cmd, strings.TrimSpace(string(out)))
-			}
+		hostClaude := filepath.Join(home, ".claude")
+		if hostClaude != "/home/sandcastle/.claude" {
+			rootScript.WriteString(fmt.Sprintf("mkdir -p %s && ln -sfn /home/sandcastle/.claude %s\n", home, hostClaude))
 		}
 	}
 
-	// Start tmux session inside container
-	report("Starting tmux session...")
-	tmuxCmd := exec.Command("docker", "exec", "-d", containerName, "tmux", "new-session", "-d", "-s", "main")
-	if err := tmuxCmd.Run(); err != nil {
-		// Non-fatal — container is still usable
-		fmt.Fprintf(os.Stderr, "Warning: tmux start failed: %v\n", err)
+	rootScript.WriteString("chown -R sandcastle:sandcastle /home/sandcastle/.claude /home/sandcastle/.claude.json 2>/dev/null || true\n")
+
+	rootCmd := exec.Command("docker", "exec", "--user", "root", "-i", containerName, "bash", "-s")
+	rootCmd.Stdin = strings.NewReader(rootScript.String())
+	rootCmd.CombinedOutput()
+
+	// User setup script: git config, setup commands, tmux (single docker exec as sandcastle)
+	var userScript strings.Builder
+	userScript.WriteString("git config --global 'url.https://github.com/.insteadOf' 'git@github.com:'\n")
+
+	if len(m.cfg.Defaults.Setup) > 0 {
+		report("Running setup commands...")
+		for _, cmd := range m.cfg.Defaults.Setup {
+			userScript.WriteString(fmt.Sprintf("(%s) || true\n", cmd))
+		}
 	}
 
-	// Customize tmux status bar with sandbox name and exit hint
-	tmuxSetup := fmt.Sprintf(
+	report("Starting tmux session...")
+	userScript.WriteString("tmux new-session -d -s main || true\n")
+	userScript.WriteString(fmt.Sprintf(
 		`tmux set -t main status-left " sandcastle: %s " && `+
 			`tmux set -t main status-right " ctrl-b d to exit " && `+
 			`tmux set -t main status-left-length 40 && `+
-			`tmux set -t main monitor-bell on`,
-		name,
-	)
-	exec.Command("docker", "exec", containerName, "bash", "-c", tmuxSetup).Run()
+			`tmux set -t main monitor-bell on || true`+"\n",
+		name))
+
+	userCmd := exec.Command("docker", "exec", "-i", containerName, "bash", "-s")
+	userCmd.Stdin = strings.NewReader(userScript.String())
+	userCmd.CombinedOutput()
 
 	// Query port mappings
 	var ports map[string]string
@@ -330,9 +311,12 @@ func (m *Manager) Destroy(name string) error {
 }
 
 // ConnectCmd returns an exec.Cmd to attach to a sandbox's tmux session.
+// Uses a shell wrapper to clear the screen before attaching, which eliminates
+// the visual flash when Bubble Tea exits alt screen during the handoff.
 func (m *Manager) ConnectCmd(name string) *exec.Cmd {
 	containerName := fmt.Sprintf("sc-%s", name)
-	return exec.Command("docker", "exec", "-it", containerName, "tmux", "attach-session", "-t", "main")
+	return exec.Command("bash", "-c",
+		fmt.Sprintf(`clear && exec docker exec -it %s tmux attach-session -t main`, containerName))
 }
 
 // List returns all sandboxes sorted by creation time.
@@ -570,7 +554,45 @@ func (m *Manager) buildImage() error {
 	if err != nil {
 		return fmt.Errorf("docker build failed: %s: %w", strings.TrimSpace(string(out)), err)
 	}
+	m.saveImageHash()
 	return nil
+}
+
+// imageUpToDate returns true if the Docker image exists locally and was built
+// from the current Dockerfile contents (hash matches the stored value).
+func (m *Manager) imageUpToDate() bool {
+	// Check if image exists locally
+	if err := exec.Command("docker", "image", "inspect", m.imageName()).Run(); err != nil {
+		return false
+	}
+
+	// Compare Dockerfile content hash
+	dfPath := filepath.Join(m.projectDir, m.cfg.Image.Dockerfile)
+	content, err := os.ReadFile(dfPath)
+	if err != nil {
+		return false
+	}
+
+	hash := fmt.Sprintf("%x", sha256.Sum256(content))
+	hashFile := filepath.Join(m.projectDir, config.Dir, ".image-hash")
+	stored, err := os.ReadFile(hashFile)
+	if err != nil {
+		return false
+	}
+
+	return strings.TrimSpace(string(stored)) == hash
+}
+
+// saveImageHash writes the current Dockerfile's content hash to .sandcastles/.image-hash.
+func (m *Manager) saveImageHash() {
+	dfPath := filepath.Join(m.projectDir, m.cfg.Image.Dockerfile)
+	content, err := os.ReadFile(dfPath)
+	if err != nil {
+		return
+	}
+	hash := fmt.Sprintf("%x", sha256.Sum256(content))
+	hashFile := filepath.Join(m.projectDir, config.Dir, ".image-hash")
+	os.WriteFile(hashFile, []byte(hash+"\n"), 0o644)
 }
 
 // identityPorts returns port mappings where host and container ports are identical (for host networking).

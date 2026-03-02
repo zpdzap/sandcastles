@@ -280,6 +280,7 @@ func (m model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		sandboxes := m.manager.List()
 		if m.cursor < len(sandboxes) {
 			name := sandboxes[m.cursor].Name
+			m.attachedAt[name] = time.Now()
 			cmd := m.manager.ConnectCmd(name)
 			return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
 				return attachFinishedMsg{name: name}
@@ -410,6 +411,7 @@ func (m model) processInput() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		name := parts[1]
+		m.attachedAt[name] = time.Now()
 		cmd := m.manager.ConnectCmd(name)
 		return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
 			return attachFinishedMsg{name: name}

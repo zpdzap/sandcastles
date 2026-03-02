@@ -1,3 +1,4 @@
 bin/
 .sandcastles/worktrees/
 .sandcastles/state.json
+.sandcastles/.image-hash
