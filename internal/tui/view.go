@@ -18,7 +18,7 @@ func (m model) View() string {
 	sandboxes := m.manager.List()
 
 	// Header — always shown
-	title := "sandcastles v0.1.0"
+	title := "sandcastles v0.2.0"
 	quip := quipStyle.Render(m.quip)
 	gap := m.width - lipgloss.Width(title) - lipgloss.Width(quip) - 4
 	if gap < 1 {
