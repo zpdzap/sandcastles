@@ -119,7 +119,7 @@ func (m model) renderSplitView(header string, sandboxes []*sandbox.Sandbox) stri
 	} else if m.confirmStop {
 		b.WriteString(confirmStyle.Render(fmt.Sprintf("Stop %s? Press x again to confirm, any other key to cancel", m.confirmStopName)))
 	} else {
-		b.WriteString(hotkeysStyle.Render("[←→] select  [enter] connect  [s]tart  [x] stop  [d]iff  [m]erge  [r]efresh  [?] help"))
+		b.WriteString(hotkeysStyle.Render("[◀ ▶] select  [enter] connect  [s]tart  [x] stop  [d]iff  [m]erge  [r]efresh  [?] help"))
 	}
 	b.WriteString("\n")
 
