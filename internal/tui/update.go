@@ -15,6 +15,22 @@ import (
 
 var validName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9-]*$`)
 
+// setMessage sets the status bar message and returns a tea.Cmd to auto-clear it.
+// Errors clear after 10s, normal messages after 5s.
+func (m *model) setMessage(text string, isErr bool) tea.Cmd {
+	m.messageID++
+	m.message = text
+	m.isError = isErr
+	d := 5 * time.Second
+	if isErr {
+		d = 10 * time.Second
+	}
+	id := m.messageID
+	return tea.Tick(d, func(time.Time) tea.Msg {
+		return clearMessageMsg{id: id}
+	})
+}
+
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -67,6 +83,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			// Detect agent state: output change + bell flag
 			m.agentStates[sb.Name] = detectAgentState(containerName, output, prevOutput)
+
+			// Fetch lightweight diff stats for column header
+			m.diffStats[sb.Name] = fetchDiffStats(sb.Name)
 		}
 		// Pick up progress updates from the background create goroutine
 		if m.progressPhase != nil && *m.progressPhase != "" {
@@ -78,42 +97,48 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case sandboxCreatedMsg:
 		m.progressName = ""
 		m.progressPhase = nil
+		var clearCmd tea.Cmd
 		if msg.err != nil {
-			m.message = fmt.Sprintf("Error: %v", msg.err)
-			m.isError = true
+			clearCmd = m.setMessage(fmt.Sprintf("Error: %v", msg.err), true)
 		} else {
-			m.message = fmt.Sprintf("Created sandcastle: %s", msg.name)
-			m.isError = false
+			clearCmd = m.setMessage(fmt.Sprintf("Created sandcastle: %s", msg.name), false)
 		}
-		return m, tea.ClearScreen
+		return m, tea.Batch(tea.ClearScreen, clearCmd)
 
 	case sandboxDestroyedMsg:
-		m.message = fmt.Sprintf("Destroyed sandcastle: %s", msg.name)
-		m.isError = false
+		clearCmd := m.setMessage(fmt.Sprintf("Destroyed sandcastle: %s", msg.name), false)
 		delete(m.previews, msg.name)
 		delete(m.agentStates, msg.name)
+		delete(m.diffStats, msg.name)
 		delete(m.bellInit, msg.name)
 		delete(m.attachedAt, msg.name)
 		sandboxes := m.manager.List()
 		if m.cursor >= len(sandboxes) && m.cursor > 0 {
 			m.cursor--
 		}
-		return m, tea.ClearScreen
+		return m, tea.Batch(tea.ClearScreen, clearCmd)
 
 	case allDestroyedMsg:
-		m.message = fmt.Sprintf("Destroyed %d sandcastles", msg.count)
-		m.isError = false
+		clearCmd := m.setMessage(fmt.Sprintf("Destroyed %d sandcastles", msg.count), false)
 		m.cursor = 0
 		m.previews = make(map[string]string)
 		m.agentStates = make(map[string]string)
+		m.diffStats = make(map[string]diffStat)
 		m.bellInit = make(map[string]bool)
 		m.attachedAt = make(map[string]time.Time)
-		return m, tea.ClearScreen
+		return m, tea.Batch(tea.ClearScreen, clearCmd)
 
 	case attachFinishedMsg:
 		// User detached from tmux — suppress polling briefly to avoid flicker
 		m.attachedAt[msg.name] = time.Now()
 		return m, tea.ClearScreen
+
+	case clearMessageMsg:
+		if msg.id == m.messageID {
+			m.message = ""
+			m.isError = false
+		}
+		return m, nil
 
 	case confirmStopExpiredMsg:
 		m.confirmStop = false
@@ -216,12 +241,10 @@ func (m model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			sb := sandboxes[m.cursor]
 			tree, err := buildDiffTree(sb.WorktreePath, sb.Name)
 			if err != nil {
-				m.message = fmt.Sprintf("diff error: %v", err)
-				m.isError = true
-			} else {
-				m.diffContent = tree
-				m.showDiff = true
+				return m, m.setMessage(fmt.Sprintf("diff error: %v", err), true)
 			}
+			m.diffContent = tree
+			m.showDiff = true
 		}
 		return m, nil
 
@@ -231,12 +254,9 @@ func (m model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			name := sandboxes[m.cursor].Name
 			result, err := m.manager.Merge(name)
 			if err != nil {
-				m.message = fmt.Sprintf("Merge failed: %v", err)
-				m.isError = true
-			} else {
-				m.message = result
-				m.isError = false
+				return m, m.setMessage(fmt.Sprintf("Merge failed: %v", err), true)
 			}
+			return m, m.setMessage(result, false)
 		}
 		return m, nil
 
@@ -245,12 +265,9 @@ func (m model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.cursor < len(sandboxes) {
 			name := sandboxes[m.cursor].Name
 			if err := m.manager.RefreshCredentials(name); err != nil {
-				m.message = fmt.Sprintf("Refresh failed: %v", err)
-				m.isError = true
-			} else {
-				m.message = fmt.Sprintf("[%s] Credentials refreshed", name)
-				m.isError = false
+				return m, m.setMessage(fmt.Sprintf("Refresh failed: %v", err), true)
 			}
+			return m, m.setMessage(fmt.Sprintf("[%s] Credentials refreshed", name), false)
 		}
 		return m, nil
 
@@ -337,15 +354,11 @@ func (m model) processInput() (tea.Model, tea.Cmd) {
 	switch parts[0] {
 	case "start":
 		if len(parts) < 2 {
-			m.message = "Usage: /start <name> [task description]"
-			m.isError = true
-			return m, nil
+			return m, m.setMessage("Usage: /start <name> [task description]", true)
 		}
 		name := parts[1]
 		if !validName.MatchString(name) {
-			m.message = "Name must be alphanumeric (hyphens ok, e.g. my-sandbox)"
-			m.isError = true
-			return m, nil
+			return m, m.setMessage("Name must be alphanumeric (hyphens ok, e.g. my-sandbox)", true)
 		}
 		task := ""
 		if len(parts) > 2 {
@@ -373,16 +386,12 @@ func (m model) processInput() (tea.Model, tea.Cmd) {
 
 	case "stop":
 		if len(parts) < 2 {
-			m.message = "Usage: /stop <name> or /stop all"
-			m.isError = true
-			return m, nil
+			return m, m.setMessage("Usage: /stop <name> or /stop all", true)
 		}
 		if parts[1] == "all" {
 			sandboxes := m.manager.List()
 			if len(sandboxes) == 0 {
-				m.message = "No sandcastles to stop"
-				m.isError = false
-				return m, nil
+				return m, m.setMessage("No sandcastles to stop", false)
 			}
 			count := len(sandboxes)
 			for _, sb := range sandboxes {
@@ -406,9 +415,7 @@ func (m model) processInput() (tea.Model, tea.Cmd) {
 
 	case "connect":
 		if len(parts) < 2 {
-			m.message = "Usage: /connect <name>"
-			m.isError = true
-			return m, nil
+			return m, m.setMessage("Usage: /connect <name>", true)
 		}
 		name := parts[1]
 		m.attachedAt[name] = time.Now()
@@ -419,68 +426,48 @@ func (m model) processInput() (tea.Model, tea.Cmd) {
 
 	case "diff":
 		if len(parts) < 2 {
-			m.message = "Usage: /diff <name>"
-			m.isError = true
-			return m, nil
+			return m, m.setMessage("Usage: /diff <name>", true)
 		}
 		name := parts[1]
 		sb, ok := m.manager.Get(name)
 		if !ok {
-			m.message = fmt.Sprintf("Sandcastle %q not found", name)
-			m.isError = true
-			return m, nil
+			return m, m.setMessage(fmt.Sprintf("Sandcastle %q not found", name), true)
 		}
 		tree, err := buildDiffTree(sb.WorktreePath, name)
 		if err != nil {
-			m.message = fmt.Sprintf("diff error: %v", err)
-			m.isError = true
-		} else {
-			m.diffContent = tree
-			m.showDiff = true
+			return m, m.setMessage(fmt.Sprintf("diff error: %v", err), true)
 		}
+		m.diffContent = tree
+		m.showDiff = true
 		return m, nil
 
 	case "merge":
 		if len(parts) < 2 {
-			m.message = "Usage: /merge <name>"
-			m.isError = true
-			return m, nil
+			return m, m.setMessage("Usage: /merge <name>", true)
 		}
 		name := parts[1]
 		result, err := m.manager.Merge(name)
 		if err != nil {
-			m.message = fmt.Sprintf("Merge failed: %v", err)
-			m.isError = true
-		} else {
-			m.message = result
-			m.isError = false
+			return m, m.setMessage(fmt.Sprintf("Merge failed: %v", err), true)
 		}
-		return m, nil
+		return m, m.setMessage(result, false)
 
 	case "refresh":
 		if len(parts) < 2 {
-			m.message = "Usage: /refresh <name>"
-			m.isError = true
-			return m, nil
+			return m, m.setMessage("Usage: /refresh <name>", true)
 		}
 		name := parts[1]
 		if err := m.manager.RefreshCredentials(name); err != nil {
-			m.message = fmt.Sprintf("Refresh failed: %v", err)
-			m.isError = true
-		} else {
-			m.message = fmt.Sprintf("[%s] Credentials refreshed", name)
-			m.isError = false
+			return m, m.setMessage(fmt.Sprintf("Refresh failed: %v", err), true)
 		}
-		return m, nil
+		return m, m.setMessage(fmt.Sprintf("[%s] Credentials refreshed", name), false)
 
 	case "quit":
 		m.quitting = true
 		return m, tea.Quit
 
 	default:
-		m.message = fmt.Sprintf("Unknown command: %s", parts[0])
-		m.isError = true
-		return m, nil
+		return m, m.setMessage(fmt.Sprintf("Unknown command: %s", parts[0]), true)
 	}
 }
 

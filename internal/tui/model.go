@@ -20,6 +20,7 @@ type model struct {
 	cursor     int
 	message    string
 	isError    bool
+	messageID  int
 	commanding bool // true when in command mode (/ pressed)
 	quitting   bool
 	width      int
@@ -33,6 +34,9 @@ type model struct {
 	agentStates map[string]string // "working" / "waiting" / "done" per sandbox
 	bellInit    map[string]bool      // sandboxes where monitor-bell has been enabled
 	attachedAt  map[string]time.Time // last time a client was detected attached
+
+	// Diff stats shown in column headers
+	diffStats map[string]diffStat // per-sandbox diff summary
 
 	// Modals
 	showHelp    bool
@@ -70,6 +74,7 @@ func newModel(mgr *sandbox.Manager, cfg *config.Config) model {
 		quip:        quips[rand.Intn(len(quips))],
 		previews:    make(map[string]string),
 		agentStates: make(map[string]string),
+		diffStats:   make(map[string]diffStat),
 		bellInit:    make(map[string]bool),
 		attachedAt:  make(map[string]time.Time),
 	}

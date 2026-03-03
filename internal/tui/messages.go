@@ -28,6 +28,11 @@ type statusTickMsg time.Time
 // confirmStopExpiredMsg cancels a pending stop confirmation.
 type confirmStopExpiredMsg struct{}
 
+// clearMessageMsg clears the status message if its ID still matches.
+type clearMessageMsg struct {
+	id int
+}
+
 // attachFinishedMsg is sent when the user detaches from a tmux session.
 type attachFinishedMsg struct {
 	name string

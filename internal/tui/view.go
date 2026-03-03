@@ -174,7 +174,42 @@ func (m model) renderColumn(index int, sb *sandbox.Sandbox, width, height int) s
 		}
 	}
 
-	header := hStyle.Width(width).Render(ansi.Truncate(headerText, width-2, ""))
+	// Diff stats for the right side of the header
+	// Every piece needs the header background so there are no gaps
+	bg := hStyle.GetBackground()
+	s := func(fg lipgloss.TerminalColor, text string) string {
+		return lipgloss.NewStyle().Foreground(fg).Background(bg).Render(text)
+	}
+	headerFg := hStyle.GetForeground()
+
+	var statsText string
+	if stats, ok := m.diffStats[sb.Name]; ok && stats.files > 0 {
+		if stats.uncommitted > 0 {
+			statsText = s(lipgloss.Color("#FFAA00"), "⚠ ")
+		}
+		statsText += s(headerFg, fmt.Sprintf("%d file%s  ", stats.files, plural(stats.files)))
+		statsText += s(lipgloss.Color("#00CC00"), fmt.Sprintf("+%d", stats.added))
+		statsText += s(headerFg, " ")
+		statsText += s(lipgloss.Color("#FF4444"), fmt.Sprintf("-%d", stats.deleted))
+	} else if sb.Status == sandbox.StatusRunning {
+		statsText = s(lipgloss.Color("#888888"), "no changes")
+	}
+
+	// Layout: left-align name, right-align stats
+	var headerLine string
+	statsWidth := lipgloss.Width(statsText)
+	nameWidth := width - 2 - statsWidth - 1 // -2 for padding, -1 for gap
+	if nameWidth < 10 || statsText == "" {
+		headerLine = ansi.Truncate(headerText, width-2, "")
+	} else {
+		truncatedName := ansi.Truncate(headerText, nameWidth, "")
+		gap := width - 2 - lipgloss.Width(truncatedName) - statsWidth
+		if gap < 1 {
+			gap = 1
+		}
+		headerLine = truncatedName + strings.Repeat(" ", gap) + statsText
+	}
+	header := hStyle.Width(width).Render(headerLine)
 
 	// Preview content — fills remaining height below header
 	contentHeight := height - 1 // 1 line for header

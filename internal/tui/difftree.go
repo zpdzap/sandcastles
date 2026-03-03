@@ -23,6 +23,14 @@ var (
 	diffDimStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
 )
 
+// diffStat holds a lightweight summary of changes for column headers.
+type diffStat struct {
+	files       int
+	added       int
+	deleted     int
+	uncommitted int
+}
+
 type diffEntry struct {
 	path        string
 	status      string // "M", "A", "D"
@@ -336,4 +344,60 @@ func plural(n int) string {
 		return ""
 	}
 	return "s"
+}
+
+// fetchDiffStats returns a lightweight summary of changes in the sandbox.
+func fetchDiffStats(sandboxName string) diffStat {
+	containerName := fmt.Sprintf("sc-%s", sandboxName)
+
+	// Committed changes: count files from --name-status
+	committedStatus, err := containerGit(containerName, "diff", "--name-status", "main...HEAD")
+	if err != nil {
+		return diffStat{}
+	}
+
+	files := make(map[string]bool)
+	for _, line := range strings.Split(strings.TrimSpace(string(committedStatus)), "\n") {
+		if line == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) >= 2 {
+			files[fields[len(fields)-1]] = true
+		}
+	}
+
+	// Line counts from --numstat
+	totalAdd, totalDel := 0, 0
+	numstat, _ := containerGit(containerName, "diff", "--numstat", "main...HEAD")
+	for _, line := range strings.Split(strings.TrimSpace(string(numstat)), "\n") {
+		if line == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+		a, _ := strconv.Atoi(fields[0])
+		d, _ := strconv.Atoi(fields[1])
+		totalAdd += a
+		totalDel += d
+	}
+
+	// Working tree: count any additional uncommitted files and track uncommitted count
+	uncommitted := 0
+	porcelain, _ := containerGit(containerName, "status", "--porcelain")
+	for _, line := range strings.Split(strings.TrimSpace(string(porcelain)), "\n") {
+		if len(line) < 3 {
+			continue
+		}
+		rest := strings.TrimSpace(line[2:])
+		if idx := strings.Index(rest, " -> "); idx >= 0 {
+			rest = rest[idx+4:]
+		}
+		files[rest] = true
+		uncommitted++
+	}
+
+	return diffStat{files: len(files), added: totalAdd, deleted: totalDel, uncommitted: uncommitted}
 }
