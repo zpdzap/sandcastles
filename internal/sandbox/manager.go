@@ -501,12 +501,10 @@ func (m *Manager) Merge(name string) (string, error) {
 		return "", fmt.Errorf("sandcastle %q not found", name)
 	}
 
-	// Commit any uncommitted changes in the worktree
+	// Refuse to merge if the worktree has uncommitted changes
 	statusOut, _ := exec.Command("git", "-C", sb.WorktreePath, "status", "--porcelain").CombinedOutput()
 	if len(strings.TrimSpace(string(statusOut))) > 0 {
-		exec.Command("git", "-C", sb.WorktreePath, "add", "-A").Run()
-		exec.Command("git", "-C", sb.WorktreePath, "commit", "-m",
-			fmt.Sprintf("WIP from sandcastle %s", name)).Run()
+		return "", fmt.Errorf("worktree has uncommitted changes — have the agent commit first")
 	}
 
 	// Count commits on the branch that aren't on the current main branch
@@ -535,6 +533,38 @@ func (m *Manager) Merge(name string) (string, error) {
 		noun = "commit"
 	}
 	return fmt.Sprintf("[%s] Merged %d %s from %s into %s", name, commitCount, noun, sb.Branch, branch), nil
+}
+
+// Rebase updates a sandbox's branch with the latest changes from the host's
+// current branch by replaying the sandbox's commits on top.
+func (m *Manager) Rebase(name string) (string, error) {
+	m.mu.Lock()
+	sb, ok := m.state.Sandboxes[name]
+	m.mu.Unlock()
+
+	if !ok {
+		return "", fmt.Errorf("sandcastle %q not found", name)
+	}
+
+	// Refuse to rebase if the worktree has uncommitted changes
+	statusOut, _ := exec.Command("git", "-C", sb.WorktreePath, "status", "--porcelain").CombinedOutput()
+	if len(strings.TrimSpace(string(statusOut))) > 0 {
+		return "", fmt.Errorf("worktree has uncommitted changes — have the agent commit first")
+	}
+
+	// Get the current main branch name
+	currentBranch, _ := exec.Command("git", "-C", m.projectDir, "rev-parse", "--abbrev-ref", "HEAD").CombinedOutput()
+	branch := strings.TrimSpace(string(currentBranch))
+
+	// Rebase the sandbox branch onto main
+	out, err := exec.Command("git", "-C", sb.WorktreePath, "rebase", branch).CombinedOutput()
+	if err != nil {
+		// Abort the failed rebase to leave the repo clean
+		exec.Command("git", "-C", sb.WorktreePath, "rebase", "--abort").Run()
+		return "", fmt.Errorf("rebase conflict — aborted automatically.\n%s", strings.TrimSpace(string(out)))
+	}
+
+	return fmt.Sprintf("[%s] Rebased onto %s", name, branch), nil
 }
 
 func (m *Manager) imageName() string {

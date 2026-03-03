@@ -260,6 +260,18 @@ func (m model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case "b":
+		sandboxes := m.manager.List()
+		if m.cursor < len(sandboxes) {
+			name := sandboxes[m.cursor].Name
+			result, err := m.manager.Rebase(name)
+			if err != nil {
+				return m, m.setMessage(fmt.Sprintf("Rebase failed: %v", err), true)
+			}
+			return m, m.setMessage(result, false)
+		}
+		return m, nil
+
 	case "r":
 		sandboxes := m.manager.List()
 		if m.cursor < len(sandboxes) {
@@ -449,6 +461,17 @@ func (m model) processInput() (tea.Model, tea.Cmd) {
 		result, err := m.manager.Merge(name)
 		if err != nil {
 			return m, m.setMessage(fmt.Sprintf("Merge failed: %v", err), true)
+		}
+		return m, m.setMessage(result, false)
+
+	case "rebase":
+		if len(parts) < 2 {
+			return m, m.setMessage("Usage: /rebase <name>", true)
+		}
+		name := parts[1]
+		result, err := m.manager.Rebase(name)
+		if err != nil {
+			return m, m.setMessage(fmt.Sprintf("Rebase failed: %v", err), true)
 		}
 		return m, m.setMessage(result, false)
 

@@ -25,6 +25,7 @@ var (
 
 // diffStat holds a lightweight summary of changes for column headers.
 type diffStat struct {
+	commits     int
 	files       int
 	added       int
 	deleted     int
@@ -350,6 +351,10 @@ func plural(n int) string {
 func fetchDiffStats(sandboxName string) diffStat {
 	containerName := fmt.Sprintf("sc-%s", sandboxName)
 
+	// Count commits ahead of main
+	commitOut, _ := containerGit(containerName, "rev-list", "--count", "main..HEAD")
+	commits, _ := strconv.Atoi(strings.TrimSpace(string(commitOut)))
+
 	// Committed changes: count files from --name-status
 	committedStatus, err := containerGit(containerName, "diff", "--name-status", "main...HEAD")
 	if err != nil {
@@ -399,5 +404,5 @@ func fetchDiffStats(sandboxName string) diffStat {
 		uncommitted++
 	}
 
-	return diffStat{files: len(files), added: totalAdd, deleted: totalDel, uncommitted: uncommitted}
+	return diffStat{commits: commits, files: len(files), added: totalAdd, deleted: totalDel, uncommitted: uncommitted}
 }

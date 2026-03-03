@@ -119,7 +119,7 @@ func (m model) renderSplitView(header string, sandboxes []*sandbox.Sandbox) stri
 	} else if m.confirmStop {
 		b.WriteString(confirmStyle.Render(fmt.Sprintf("Stop %s? Press x again to confirm, any other key to cancel", m.confirmStopName)))
 	} else {
-		b.WriteString(hotkeysStyle.Render("[◀ ▶] select  [enter] connect  [s]tart  [x] stop  [d]iff  [m]erge  [r]eauth  [?] help"))
+		b.WriteString(hotkeysStyle.Render("[◀ ▶] select  [enter] connect  [s]tart  [x] stop  [d]iff  [m]erge  re[b]ase  [r]eauth  [?] help"))
 	}
 	b.WriteString("\n")
 
@@ -183,9 +183,12 @@ func (m model) renderColumn(index int, sb *sandbox.Sandbox, width, height int) s
 	headerFg := hStyle.GetForeground()
 
 	var statsText string
-	if stats, ok := m.diffStats[sb.Name]; ok && stats.files > 0 {
+	if stats, ok := m.diffStats[sb.Name]; ok && (stats.files > 0 || stats.commits > 0) {
 		if stats.uncommitted > 0 {
 			statsText = s(lipgloss.Color("#FFAA00"), "⚠ ")
+		}
+		if stats.commits > 0 {
+			statsText += s(headerFg, fmt.Sprintf("%d commit%s  ", stats.commits, plural(stats.commits)))
 		}
 		statsText += s(headerFg, fmt.Sprintf("%d file%s  ", stats.files, plural(stats.files)))
 		statsText += s(lipgloss.Color("#00CC00"), fmt.Sprintf("+%d", stats.added))
@@ -294,6 +297,7 @@ func (m model) renderHelpOverlay(base string) string {
 		helpKeyStyle.Render("  x") + helpDescStyle.Render("           Stop selected sandbox"),
 		helpKeyStyle.Render("  d") + helpDescStyle.Render("           Diff selected sandbox"),
 		helpKeyStyle.Render("  m") + helpDescStyle.Render("           Merge selected sandbox"),
+		helpKeyStyle.Render("  b") + helpDescStyle.Render("           Rebase onto local main"),
 		helpKeyStyle.Render("  r") + helpDescStyle.Render("           Reauth credentials"),
 		"",
 		helpHeaderStyle.Render("Commands"),
@@ -303,6 +307,7 @@ func (m model) renderHelpOverlay(base string) string {
 		helpDescStyle.Render("  /connect <name>"),
 		helpDescStyle.Render("  /diff <name>"),
 		helpDescStyle.Render("  /merge <name>"),
+		helpDescStyle.Render("  /rebase <name>"),
 		helpDescStyle.Render("  /reauth <name>"),
 		"",
 		helpKeyStyle.Render("  q") + helpDescStyle.Render("  quit") + "     " + helpKeyStyle.Render("?") + helpDescStyle.Render("  close this help"),

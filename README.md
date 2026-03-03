@@ -40,6 +40,7 @@ sc
 | `/connect <name>` | Attach to a sandbox's tmux session |
 | `/diff <name>` | Show git diff from a sandbox's worktree |
 | `/merge <name>` | Merge a sandbox's branch into your current branch |
+| `/rebase <name>` | Rebase a sandbox's branch onto your current branch |
 | `/stop all` | Stop and remove all sandboxes |
 | `/quit` | Exit the dashboard (running sandboxes stay alive) |
 
@@ -51,7 +52,8 @@ sc
 4. **Enter** on a sandbox drops you into the tmux session (detach with `Ctrl-B d`)
 5. Code changes appear in `.sandcastles/worktrees/<name>/` — open it in your IDE
 6. **`/merge`** merges the sandbox's branch into your current branch
-7. **`/stop`** cleans up the container, worktree, and branch
+7. **`/rebase`** updates a sandbox's branch with the latest changes from your current branch
+8. **`/stop`** cleans up the container, worktree, and branch
 
 ### Merge Workflow
 
@@ -61,10 +63,19 @@ Each sandcastle works on its own git branch (`sc-<name>`). When the agent's work
 
 ![diff tree view](docs/sandcastles-diff.png)
 
-2. `/merge <name>` — merges the branch into your current branch (auto-commits any uncommitted work in the worktree first)
+2. `/merge <name>` — merges the branch into your current branch
 3. `/stop <name>` — cleans up the container, worktree, and branch
 
-Since worktrees share the same git database, the merge is entirely local — no push required.
+Merge requires a clean worktree — if the agent has uncommitted changes, have it commit first. Since worktrees share the same git database, the merge is entirely local — no push required.
+
+### Rebase Workflow
+
+When you merge one sandcastle's work and want another running sandcastle to pick up those changes:
+
+1. `/rebase <name>` or press `b` — rebases the sandbox's branch onto your current branch
+2. The agent's commits are replayed on top of the latest main
+
+This keeps long-running agents up to date without restarting them. Like merge, rebase requires a clean worktree. If there are conflicts, the rebase is automatically aborted and you're notified.
 
 ## Config
 
