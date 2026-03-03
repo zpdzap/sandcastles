@@ -286,7 +286,7 @@ func (m model) renderStatusAndInput(b *strings.Builder) {
 func (m model) renderHelpOverlay(base string) string {
 	help := strings.Join([]string{
 		helpHeaderStyle.Render("Navigation"),
-		helpKeyStyle.Render("  ←/h  →/l") + helpDescStyle.Render("   Select sandbox"),
+		helpKeyStyle.Render("  ◀/h  ▶/l") + helpDescStyle.Render("   Select sandbox"),
 		helpKeyStyle.Render("  Enter") + helpDescStyle.Render("       Connect (tmux attach)"),
 		"",
 		helpHeaderStyle.Render("Actions"),
