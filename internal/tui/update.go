@@ -265,9 +265,9 @@ func (m model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.cursor < len(sandboxes) {
 			name := sandboxes[m.cursor].Name
 			if err := m.manager.RefreshCredentials(name); err != nil {
-				return m, m.setMessage(fmt.Sprintf("Refresh failed: %v", err), true)
+				return m, m.setMessage(fmt.Sprintf("Reauth failed: %v", err), true)
 			}
-			return m, m.setMessage(fmt.Sprintf("[%s] Credentials refreshed", name), false)
+			return m, m.setMessage(fmt.Sprintf("[%s] Credentials reauthorized", name), false)
 		}
 		return m, nil
 
@@ -452,15 +452,15 @@ func (m model) processInput() (tea.Model, tea.Cmd) {
 		}
 		return m, m.setMessage(result, false)
 
-	case "refresh":
+	case "reauth":
 		if len(parts) < 2 {
-			return m, m.setMessage("Usage: /refresh <name>", true)
+			return m, m.setMessage("Usage: /reauth <name>", true)
 		}
 		name := parts[1]
 		if err := m.manager.RefreshCredentials(name); err != nil {
-			return m, m.setMessage(fmt.Sprintf("Refresh failed: %v", err), true)
+			return m, m.setMessage(fmt.Sprintf("Reauth failed: %v", err), true)
 		}
-		return m, m.setMessage(fmt.Sprintf("[%s] Credentials refreshed", name), false)
+		return m, m.setMessage(fmt.Sprintf("[%s] Credentials reauthorized", name), false)
 
 	case "quit":
 		m.quitting = true
