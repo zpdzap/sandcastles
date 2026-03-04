@@ -74,6 +74,19 @@ func (m *Manager) Create(name, task string, progress ProgressFunc) (*Sandbox, er
 		}
 	}
 
+	// Determine whether to use the warm image (setup already baked in)
+	useWarm := false
+	baseID := m.baseImageID()
+	if m.warmImageExists() && warmImageUpToDate(m.projectDir, baseID, m.cfg.Language) {
+		useWarm = true
+		report("Using warm image (setup cached)...")
+	}
+
+	startImage := m.imageName()
+	if useWarm {
+		startImage = warmImageName(m.cfg.Project)
+	}
+
 	// Start container
 	report("Starting container...")
 	containerName := fmt.Sprintf("sc-%s", name)
@@ -128,7 +141,12 @@ func (m *Manager) Create(name, task string, progress ProgressFunc) (*Sandbox, er
 		args = append(args, "-v", mount)
 	}
 
-	args = append(args, m.imageName(), "sleep", "infinity")
+	// Cache volumes for package manager caches (persist across containers)
+	for _, vol := range cacheVolumes(m.cfg.Project, m.cfg.Language) {
+		args = append(args, "-v", vol)
+	}
+
+	args = append(args, startImage, "sleep", "infinity")
 
 	cmd := exec.Command("docker", args...)
 	out, err := cmd.CombinedOutput()
@@ -238,7 +256,7 @@ PYEOF
 	var userScript strings.Builder
 	userScript.WriteString("git config --global 'url.https://github.com/.insteadOf' 'git@github.com:'\n")
 
-	if len(m.cfg.Defaults.Setup) > 0 {
+	if len(m.cfg.Defaults.Setup) > 0 && !useWarm {
 		report("Running setup commands...")
 		for _, cmd := range m.cfg.Defaults.Setup {
 			userScript.WriteString(fmt.Sprintf("(%s) || true\n", cmd))
@@ -257,6 +275,14 @@ PYEOF
 	userCmd := exec.Command("docker", "exec", "-i", containerName, "bash", "-s")
 	userCmd.Stdin = strings.NewReader(userScript.String())
 	userCmd.CombinedOutput()
+
+	// Auto-warm: snapshot container as warm image after first setup
+	if !useWarm && len(m.cfg.Defaults.Setup) > 0 {
+		report("Creating warm image for future fast starts...")
+		if _, err := exec.Command("docker", "commit", containerName, warmImageName(m.cfg.Project)).CombinedOutput(); err == nil {
+			saveWarmHash(m.projectDir, baseID, m.cfg.Language)
+		}
+	}
 
 	// Query port mappings
 	var ports map[string]string
@@ -569,6 +595,26 @@ func (m *Manager) Rebase(name string) (string, error) {
 
 func (m *Manager) imageName() string {
 	return fmt.Sprintf("sc-%s", m.cfg.Project)
+}
+
+// baseImageID returns the Docker image ID for the base image.
+func (m *Manager) baseImageID() string {
+	out, err := exec.Command("docker", "image", "inspect", "-f", "{{.Id}}", m.imageName()).CombinedOutput()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// warmImageExists checks if the warm image tag exists locally.
+func (m *Manager) warmImageExists() bool {
+	return exec.Command("docker", "image", "inspect", warmImageName(m.cfg.Project)).Run() == nil
+}
+
+// removeWarmImage removes the warm Docker image and hash file.
+func (m *Manager) removeWarmImage() {
+	exec.Command("docker", "rmi", warmImageName(m.cfg.Project)).Run()
+	removeWarmHash(m.projectDir)
 }
 
 func (m *Manager) buildImage() error {
