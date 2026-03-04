@@ -23,6 +23,7 @@ type model struct {
 	messageID  int
 	commanding bool // true when in command mode (/ pressed)
 	quitting   bool
+	attaching  bool // suppress final render before ExecProcess handoff
 	width      int
 	height     int
 	progressName  string  // name of sandbox being created

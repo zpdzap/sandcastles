@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/zpdzap/sandcastles/internal/agent"
 	"github.com/zpdzap/sandcastles/internal/sandbox"
+	"golang.org/x/term"
 )
 
 var validName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9-]*$`)
@@ -129,9 +131,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(tea.ClearScreen, clearCmd)
 
 	case attachFinishedMsg:
-		// User detached from tmux — suppress polling briefly to avoid flicker
+		m.attaching = false
 		m.attachedAt[msg.name] = time.Now()
-		return m, tea.ClearScreen
+		fmt.Fprint(os.Stdout, "\033[2J\033[H")
+		w, h, _ := term.GetSize(int(os.Stdout.Fd()))
+		if w > 0 && h > 0 {
+			m.width = w
+			m.height = h
+		}
+		return m, tea.WindowSize()
 
 	case clearMessageMsg:
 		if msg.id == m.messageID {
@@ -309,6 +317,7 @@ func (m model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		sandboxes := m.manager.List()
 		if m.cursor < len(sandboxes) {
 			name := sandboxes[m.cursor].Name
+			m.attaching = true
 			m.attachedAt[name] = time.Now()
 			cmd := m.manager.ConnectCmd(name)
 			return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
@@ -430,6 +439,7 @@ func (m model) processInput() (tea.Model, tea.Cmd) {
 			return m, m.setMessage("Usage: /connect <name>", true)
 		}
 		name := parts[1]
+		m.attaching = true
 		m.attachedAt[name] = time.Now()
 		cmd := m.manager.ConnectCmd(name)
 		return m, tea.ExecProcess(cmd, func(err error) tea.Msg {

@@ -11,14 +11,14 @@ import (
 )
 
 func (m model) View() string {
-	if m.quitting {
+	if m.quitting || m.attaching {
 		return ""
 	}
 
 	sandboxes := m.manager.List()
 
 	// Header — always shown
-	title := "sandcastles v0.2.0"
+	title := "sandcastles v0.2.1"
 	quip := quipStyle.Render(m.quip)
 	gap := m.width - lipgloss.Width(title) - lipgloss.Width(quip) - 4
 	if gap < 1 {

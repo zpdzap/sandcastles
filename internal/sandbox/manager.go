@@ -316,7 +316,7 @@ func (m *Manager) Destroy(name string) error {
 func (m *Manager) ConnectCmd(name string) *exec.Cmd {
 	containerName := fmt.Sprintf("sc-%s", name)
 	return exec.Command("bash", "-c",
-		fmt.Sprintf(`clear && exec docker exec -it %s tmux attach-session -t main`, containerName))
+		fmt.Sprintf(`printf '\033[?1049h\033[H' && exec docker exec -it %s tmux attach-session -t main`, containerName))
 }
 
 // List returns all sandboxes sorted by creation time.
