@@ -645,6 +645,7 @@ func (m *Manager) buildImageWithOptions(noCache bool) error {
 
 // Rebuild forces a full image rebuild with --no-cache, picking up updated packages.
 func (m *Manager) Rebuild() error {
+	m.removeWarmImage()
 	return m.buildImageWithOptions(true)
 }
 

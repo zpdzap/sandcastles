@@ -86,6 +86,22 @@ Each sandcastle works on its own git branch (`sc-<name>`). When the agent's work
 
 Merge requires a clean worktree — if the agent has uncommitted changes, have it commit first. Since worktrees share the same git database, the merge is entirely local — no push required.
 
+### Fast Startup (Warm Images)
+
+Sandcastles automatically caches setup results for fast container starts:
+
+1. **First sandcastle** runs your setup commands (`npm install`, etc.) normally
+2. After setup completes, the container is snapshotted as a warm image
+3. **Subsequent sandcastles** start from the warm image — setup is instant
+
+The warm image is automatically invalidated when:
+- You run `sc rebuild`
+- Dependency manifests change (`package.json`, `go.mod`, `requirements.txt`, etc.)
+
+Package manager caches (npm, Go modules, pip) are also shared across all sandcastles via Docker volumes, so even cold installs are faster.
+
+No configuration needed — this is fully automatic.
+
 ### Rebase Workflow
 
 When you merge one sandcastle's work and want another running sandcastle to pick up those changes:

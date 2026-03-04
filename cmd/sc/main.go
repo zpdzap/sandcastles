@@ -247,6 +247,7 @@ func updateGitignore(projectDir string) error {
 	entries := []string{
 		".sandcastles/worktrees/",
 		".sandcastles/state.json",
+		".sandcastles/.warm-hash",
 	}
 
 	existing, _ := os.ReadFile(gitignorePath)
