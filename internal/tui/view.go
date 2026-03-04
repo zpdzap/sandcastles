@@ -184,13 +184,15 @@ func (m model) renderColumn(index int, sb *sandbox.Sandbox, width, height int) s
 
 	var statsText string
 	if stats, ok := m.diffStats[sb.Name]; ok && (stats.files > 0 || stats.commits > 0) {
-		if stats.uncommitted > 0 {
-			statsText = s(lipgloss.Color("#FFAA00"), "⚠ ")
-		}
 		if stats.commits > 0 {
-			statsText += s(headerFg, fmt.Sprintf("%d commit%s  ", stats.commits, plural(stats.commits)))
+			statsText = s(headerFg, fmt.Sprintf("%d commit%s  ", stats.commits, plural(stats.commits)))
 		}
-		statsText += s(headerFg, fmt.Sprintf("%d file%s  ", stats.files, plural(stats.files)))
+		statsText += s(headerFg, fmt.Sprintf("%d file%s ", stats.files, plural(stats.files)))
+		if stats.uncommitted > 0 {
+			statsText += s(lipgloss.Color("#FFAA00"), "⚠ ")
+		} else {
+			statsText += s(headerFg, " ")
+		}
 		statsText += s(lipgloss.Color("#00CC00"), fmt.Sprintf("+%d", stats.added))
 		statsText += s(headerFg, " ")
 		statsText += s(lipgloss.Color("#FF4444"), fmt.Sprintf("-%d", stats.deleted))
