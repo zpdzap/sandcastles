@@ -4,6 +4,16 @@ Orchestrate multiple AI coding agents in isolated Docker containers. Each agent 
 
 ![sandcastles TUI](docs/sandcastles-ui.png)
 
+## Workstation Setup
+
+Sandcastles works best as part of a three-pane workflow:
+
+![sandcastles workflow](docs/sandcastles-workflow.png)
+
+- **Top left — Claude on the host.** For non-dev tasks: answering questions, handling merge conflicts, resolving rebase conflicts, reviewing diffs, and coordinating work across sandcastles.
+- **Bottom left — Terminal.** For running commands directly: dev servers, test suites, git operations, or anything that needs host-level access.
+- **Right — Sandcastles TUI.** Your multiple agents working on dev tasks in parallel, each in its own isolated container.
+
 ## Install
 
 ```bash
