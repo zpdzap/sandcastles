@@ -20,6 +20,7 @@ func main() {
 	}
 
 	root.AddCommand(initCmd())
+	root.AddCommand(rebuildCmd())
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
@@ -96,6 +97,34 @@ func initCmd() *cobra.Command {
 				fmt.Println("      network: host")
 			}
 			fmt.Println("\nRun `sc` to launch the dashboard.")
+			return nil
+		},
+	}
+}
+
+func rebuildCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "rebuild",
+		Short: "Force a full image rebuild (picks up updated packages like Claude Code)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			projectDir, err := os.Getwd()
+			if err != nil {
+				return err
+			}
+
+			cfg, err := config.Load(projectDir)
+			if err != nil {
+				return fmt.Errorf("not a sandcastles project (run `sc init` first): %w", err)
+			}
+
+			mgr := sandbox.NewManager(projectDir, cfg)
+
+			fmt.Println("Rebuilding image with --no-cache (this may take a minute)...")
+			if err := mgr.Rebuild(); err != nil {
+				return err
+			}
+
+			fmt.Println("Image rebuilt. New sandcastles will use the updated image.")
 			return nil
 		},
 	}

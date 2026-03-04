@@ -31,6 +31,14 @@ sc init
 sc
 ```
 
+## CLI Commands
+
+| Command | Description |
+|---------|-------------|
+| `sc init` | Initialize sandcastles in the current project |
+| `sc` | Launch the TUI dashboard |
+| `sc rebuild` | Force a full image rebuild with `--no-cache` (picks up updated packages like Claude Code) |
+
 ## TUI Commands
 
 | Command | Description |

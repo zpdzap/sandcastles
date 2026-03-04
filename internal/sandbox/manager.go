@@ -572,13 +572,22 @@ func (m *Manager) imageName() string {
 }
 
 func (m *Manager) buildImage() error {
+	return m.buildImageWithOptions(false)
+}
+
+func (m *Manager) buildImageWithOptions(noCache bool) error {
 	dockerfilePath := m.cfg.Image.Dockerfile
 	uid := fmt.Sprintf("%d", os.Getuid())
 	gid := fmt.Sprintf("%d", os.Getgid())
-	cmd := exec.Command("docker", "build", "-q",
-		"--build-arg", "HOST_UID="+uid,
-		"--build-arg", "HOST_GID="+gid,
-		"-t", m.imageName(), "-f", dockerfilePath, ".")
+	args := []string{"build", "-q",
+		"--build-arg", "HOST_UID=" + uid,
+		"--build-arg", "HOST_GID=" + gid,
+	}
+	if noCache {
+		args = append(args, "--no-cache")
+	}
+	args = append(args, "-t", m.imageName(), "-f", dockerfilePath, ".")
+	cmd := exec.Command("docker", args...)
 	cmd.Dir = m.projectDir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -586,6 +595,11 @@ func (m *Manager) buildImage() error {
 	}
 	m.saveImageHash()
 	return nil
+}
+
+// Rebuild forces a full image rebuild with --no-cache, picking up updated packages.
+func (m *Manager) Rebuild() error {
+	return m.buildImageWithOptions(true)
 }
 
 // imageUpToDate returns true if the Docker image exists locally and was built
