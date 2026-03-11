@@ -6,9 +6,39 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 )
+
+var (
+	worktreeCacheMu sync.Mutex
+	worktreeCache   = make(map[string]worktreeCacheEntry)
+)
+
+type worktreeCacheEntry struct {
+	path    string
+	checked time.Time
+}
+
+// cachedWorktreePath returns the nested worktree path for a container,
+// caching the result for 30 seconds to avoid repeated docker exec calls.
+func cachedWorktreePath(containerName string) string {
+	worktreeCacheMu.Lock()
+	defer worktreeCacheMu.Unlock()
+
+	if entry, ok := worktreeCache[containerName]; ok && time.Since(entry.checked) < 30*time.Second {
+		return entry.path
+	}
+
+	wtCheck, _ := exec.Command("docker", "exec", containerName,
+		"sh", "-c", "ls -d /workspace/.worktrees/*/ 2>/dev/null | head -1").Output()
+	wtPath := strings.TrimSpace(string(wtCheck))
+
+	worktreeCache[containerName] = worktreeCacheEntry{path: wtPath, checked: time.Now()}
+	return wtPath
+}
 
 var (
 	diffAddStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#00CC00"))
@@ -53,11 +83,7 @@ func newDirNode(name string) *dirNode {
 // containerGit runs a git command inside the sandbox container.
 // It detects nested worktrees and sets GIT_DIR/GIT_WORK_TREE accordingly.
 func containerGit(containerName string, args ...string) ([]byte, error) {
-	// Check if the container has a nested worktree (agent created one inside)
-	// by looking for .worktrees/ directory
-	wtCheck, _ := exec.Command("docker", "exec", containerName,
-		"sh", "-c", "ls -d /workspace/.worktrees/*/ 2>/dev/null | head -1").Output()
-	wtPath := strings.TrimSpace(string(wtCheck))
+	wtPath := cachedWorktreePath(containerName)
 
 	var dockerArgs []string
 	if wtPath != "" {

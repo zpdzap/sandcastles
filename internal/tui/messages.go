@@ -38,6 +38,15 @@ type attachFinishedMsg struct {
 	name string
 }
 
+// statusPollResultMsg carries the results of async status polling.
+type statusPollResultMsg struct {
+	previews    map[string]string
+	agentStates map[string]string
+	diffStats   map[string]diffStat
+	bellInit    map[string]bool
+	attachedAt  map[string]time.Time
+}
+
 // tickCmd returns a command that sends a tick every 2 seconds.
 func tickCmd() tea.Cmd {
 	return tea.Tick(2*time.Second, func(t time.Time) tea.Msg {

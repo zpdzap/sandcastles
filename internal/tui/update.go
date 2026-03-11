@@ -42,54 +42,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case statusTickMsg:
-		m.manager.RefreshStatuses()
-		// Poll tmux output and bell flag from each running sandbox
-		for _, sb := range m.manager.List() {
-			if sb.Status != sandbox.StatusRunning {
-				continue
-			}
-			containerName := fmt.Sprintf("sc-%s", sb.Name)
-
-			// Enable monitor-bell once per sandbox so tmux tracks BEL signals
-			if !m.bellInit[sb.Name] {
-				exec.Command("docker", "exec", containerName,
-					"tmux", "set-option", "-t", "main", "monitor-bell", "on").Run()
-				m.bellInit[sb.Name] = true
-			}
-
-			// Skip ALL docker exec calls when a client was recently attached.
-			// Even list-clients causes flicker during rapid output, so once we
-			// detect attachment we back off entirely for 10 seconds.
-			if t, ok := m.attachedAt[sb.Name]; ok && time.Since(t) < 4*time.Second {
-				continue
-			}
-
-			// Check if a user is attached — if so, cache and skip
-			clientOut, _ := exec.Command("docker", "exec", containerName,
-				"tmux", "list-clients", "-t", "main").CombinedOutput()
-			if strings.Contains(string(clientOut), "attached") {
-				m.attachedAt[sb.Name] = time.Now()
-				continue
-			}
-			delete(m.attachedAt, sb.Name)
-
-			// Capture pane output for preview
-			out, err := exec.Command("docker", "exec", containerName,
-				"tmux", "capture-pane", "-t", "main", "-p", "-S", "-30").CombinedOutput()
-			if err != nil {
-				continue
-			}
-			output := string(out)
-			prevOutput := m.previews[sb.Name]
-			m.previews[sb.Name] = output
-
-			// Detect agent state: output change + bell flag
-			m.agentStates[sb.Name] = detectAgentState(containerName, output, prevOutput)
-
-			// Fetch lightweight diff stats for column header
-			m.diffStats[sb.Name] = fetchDiffStats(sb.Name)
+		// Pick up progress updates (lightweight, non-blocking)
+		if m.progressPhase != nil && *m.progressPhase != "" {
+			m.message = fmt.Sprintf("[%s] %s", m.progressName, *m.progressPhase)
+			m.isError = false
 		}
-		// Pick up progress updates from the background create goroutine
+		// Dispatch heavy polling to a background goroutine
+		return m, pollStatusCmd(m.manager, m.previews, m.agentStates, m.diffStats, m.bellInit, m.attachedAt)
+
+	case statusPollResultMsg:
+		m.previews = msg.previews
+		m.agentStates = msg.agentStates
+		m.diffStats = msg.diffStats
+		m.bellInit = msg.bellInit
+		m.attachedAt = msg.attachedAt
+		// Pick up progress updates
 		if m.progressPhase != nil && *m.progressPhase != "" {
 			m.message = fmt.Sprintf("[%s] %s", m.progressName, *m.progressPhase)
 			m.isError = false
@@ -501,6 +468,115 @@ func (m model) processInput() (tea.Model, tea.Cmd) {
 
 	default:
 		return m, m.setMessage(fmt.Sprintf("Unknown command: %s", parts[0]), true)
+	}
+}
+
+// pollStatusCmd runs all docker exec calls in a background goroutine and
+// returns the results as a statusPollResultMsg. This keeps Update() non-blocking.
+func pollStatusCmd(
+	mgr *sandbox.Manager,
+	prevPreviews map[string]string,
+	prevAgentStates map[string]string,
+	prevDiffStats map[string]diffStat,
+	prevBellInit map[string]bool,
+	prevAttachedAt map[string]time.Time,
+) tea.Cmd {
+	// Copy maps to avoid races with the main goroutine
+	copyPreviews := make(map[string]string, len(prevPreviews))
+	for k, v := range prevPreviews {
+		copyPreviews[k] = v
+	}
+	copyAgentStates := make(map[string]string, len(prevAgentStates))
+	for k, v := range prevAgentStates {
+		copyAgentStates[k] = v
+	}
+	copyDiffStats := make(map[string]diffStat, len(prevDiffStats))
+	for k, v := range prevDiffStats {
+		copyDiffStats[k] = v
+	}
+	copyBellInit := make(map[string]bool, len(prevBellInit))
+	for k, v := range prevBellInit {
+		copyBellInit[k] = v
+	}
+	copyAttachedAt := make(map[string]time.Time, len(prevAttachedAt))
+	for k, v := range prevAttachedAt {
+		copyAttachedAt[k] = v
+	}
+
+	return func() tea.Msg {
+		mgr.RefreshStatuses()
+
+		previews := make(map[string]string)
+		agentStates := make(map[string]string)
+		diffStats := make(map[string]diffStat)
+
+		for _, sb := range mgr.List() {
+			if sb.Status != sandbox.StatusRunning {
+				continue
+			}
+			containerName := fmt.Sprintf("sc-%s", sb.Name)
+
+			// Enable monitor-bell once per sandbox
+			if !copyBellInit[sb.Name] {
+				exec.Command("docker", "exec", containerName,
+					"tmux", "set-option", "-t", "main", "monitor-bell", "on").Run()
+				copyBellInit[sb.Name] = true
+			}
+
+			// Skip when a client was recently attached
+			if t, ok := copyAttachedAt[sb.Name]; ok && time.Since(t) < 4*time.Second {
+				// Carry forward previous data for skipped sandboxes
+				if p, ok := copyPreviews[sb.Name]; ok {
+					previews[sb.Name] = p
+				}
+				if s, ok := copyAgentStates[sb.Name]; ok {
+					agentStates[sb.Name] = s
+				}
+				if d, ok := copyDiffStats[sb.Name]; ok {
+					diffStats[sb.Name] = d
+				}
+				continue
+			}
+
+			// Check if a user is attached
+			clientOut, _ := exec.Command("docker", "exec", containerName,
+				"tmux", "list-clients", "-t", "main").CombinedOutput()
+			if strings.Contains(string(clientOut), "attached") {
+				copyAttachedAt[sb.Name] = time.Now()
+				if p, ok := copyPreviews[sb.Name]; ok {
+					previews[sb.Name] = p
+				}
+				if s, ok := copyAgentStates[sb.Name]; ok {
+					agentStates[sb.Name] = s
+				}
+				if d, ok := copyDiffStats[sb.Name]; ok {
+					diffStats[sb.Name] = d
+				}
+				continue
+			}
+			delete(copyAttachedAt, sb.Name)
+
+			// Capture pane output for preview
+			out, err := exec.Command("docker", "exec", containerName,
+				"tmux", "capture-pane", "-t", "main", "-p", "-S", "-30").CombinedOutput()
+			if err != nil {
+				continue
+			}
+			output := string(out)
+			prevOutput := copyPreviews[sb.Name]
+			previews[sb.Name] = output
+
+			agentStates[sb.Name] = detectAgentState(containerName, output, prevOutput)
+			diffStats[sb.Name] = fetchDiffStats(sb.Name)
+		}
+
+		return statusPollResultMsg{
+			previews:    previews,
+			agentStates: agentStates,
+			diffStats:   diffStats,
+			bellInit:    copyBellInit,
+			attachedAt:  copyAttachedAt,
+		}
 	}
 }
 
