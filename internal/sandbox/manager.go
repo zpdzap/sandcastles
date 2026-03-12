@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"fmt"
 	"os"
@@ -252,7 +253,22 @@ PYEOF
 	rootCmd.Stdin = strings.NewReader(rootScript.String())
 	rootCmd.CombinedOutput()
 
-	// User setup script: git config, setup commands, tmux (single docker exec as sandcastle)
+	// Copy claude-chill binary into the container (PTY proxy that prevents tmux flicker)
+	scBin, _ := os.Executable()
+	chillBin := filepath.Join(filepath.Dir(scBin), "claude-chill")
+	if _, err := os.Stat(chillBin); err == nil {
+		exec.Command("docker", "cp", chillBin, containerName+":/usr/local/bin/claude-chill").Run()
+	}
+
+	// Copy X11 auth cookie so containers can connect to the host display
+	xauthOut, err := exec.Command("xauth", "extract", "-", ":0").Output()
+	if err == nil && len(xauthOut) > 0 {
+		merge := exec.Command("docker", "exec", "-i", containerName, "xauth", "merge", "-")
+		merge.Stdin = bytes.NewReader(xauthOut)
+		merge.Run()
+	}
+
+	// User setup script: git config, setup commands (single docker exec as sandcastle)
 	var userScript strings.Builder
 	userScript.WriteString("git config --global 'url.https://github.com/.insteadOf' 'git@github.com:'\n")
 
@@ -266,10 +282,10 @@ PYEOF
 	report("Starting tmux session...")
 	userScript.WriteString("tmux new-session -d -s main || true\n")
 	userScript.WriteString(fmt.Sprintf(
-		`tmux set -t main status-left " sandcastle: %s " && `+
+		`tmux set -t main status on && `+
+			`tmux set -t main status-left " sandcastle: %s " && `+
 			`tmux set -t main status-right " ctrl-b d to exit " && `+
-			`tmux set -t main status-left-length 40 && `+
-			`tmux set -t main monitor-bell on || true`+"\n",
+			`tmux set -t main status-left-length 40 || true`+"\n",
 		name))
 
 	userCmd := exec.Command("docker", "exec", "-i", containerName, "bash", "-s")
@@ -391,10 +407,8 @@ func (m *Manager) Reconcile() error {
 			changed = true
 		}
 
-		// Enable monitor-bell and refresh port mappings for running containers
+		// Refresh port mappings for running containers
 		if newStatus == StatusRunning {
-			exec.Command("docker", "exec", containerName,
-				"tmux", "set-option", "-t", "main", "monitor-bell", "on").Run()
 			if m.cfg.Defaults.IsHostNetwork() {
 				sb.Ports = m.identityPorts()
 			} else {

@@ -200,7 +200,7 @@ ENV LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 TERM=xterm-256color
 
 # Install Node.js 22 from NodeSource (Ubuntu's nodejs is too old)
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
-    apt-get install -y nodejs && \
+    apt-get install -y nodejs=22.* && \
     rm -rf /var/lib/apt/lists/*
 %s
 RUN npm install -g @anthropic-ai/claude-code

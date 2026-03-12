@@ -43,7 +43,6 @@ type statusPollResultMsg struct {
 	previews    map[string]string
 	agentStates map[string]string
 	diffStats   map[string]diffStat
-	bellInit    map[string]bool
 	attachedAt  map[string]time.Time
 }
 

@@ -48,13 +48,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.isError = false
 		}
 		// Dispatch heavy polling to a background goroutine
-		return m, pollStatusCmd(m.manager, m.previews, m.agentStates, m.diffStats, m.bellInit, m.attachedAt)
+		return m, pollStatusCmd(m.manager, m.previews, m.agentStates, m.diffStats, m.attachedAt)
 
 	case statusPollResultMsg:
 		m.previews = msg.previews
 		m.agentStates = msg.agentStates
 		m.diffStats = msg.diffStats
-		m.bellInit = msg.bellInit
 		m.attachedAt = msg.attachedAt
 		// Pick up progress updates
 		if m.progressPhase != nil && *m.progressPhase != "" {
@@ -79,7 +78,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		delete(m.previews, msg.name)
 		delete(m.agentStates, msg.name)
 		delete(m.diffStats, msg.name)
-		delete(m.bellInit, msg.name)
 		delete(m.attachedAt, msg.name)
 		sandboxes := m.manager.List()
 		if m.cursor >= len(sandboxes) && m.cursor > 0 {
@@ -93,7 +91,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.previews = make(map[string]string)
 		m.agentStates = make(map[string]string)
 		m.diffStats = make(map[string]diffStat)
-		m.bellInit = make(map[string]bool)
 		m.attachedAt = make(map[string]time.Time)
 		return m, tea.Batch(tea.ClearScreen, clearCmd)
 
@@ -478,7 +475,6 @@ func pollStatusCmd(
 	prevPreviews map[string]string,
 	prevAgentStates map[string]string,
 	prevDiffStats map[string]diffStat,
-	prevBellInit map[string]bool,
 	prevAttachedAt map[string]time.Time,
 ) tea.Cmd {
 	// Copy maps to avoid races with the main goroutine
@@ -493,10 +489,6 @@ func pollStatusCmd(
 	copyDiffStats := make(map[string]diffStat, len(prevDiffStats))
 	for k, v := range prevDiffStats {
 		copyDiffStats[k] = v
-	}
-	copyBellInit := make(map[string]bool, len(prevBellInit))
-	for k, v := range prevBellInit {
-		copyBellInit[k] = v
 	}
 	copyAttachedAt := make(map[string]time.Time, len(prevAttachedAt))
 	for k, v := range prevAttachedAt {
@@ -516,13 +508,6 @@ func pollStatusCmd(
 			}
 			containerName := fmt.Sprintf("sc-%s", sb.Name)
 
-			// Enable monitor-bell once per sandbox
-			if !copyBellInit[sb.Name] {
-				exec.Command("docker", "exec", containerName,
-					"tmux", "set-option", "-t", "main", "monitor-bell", "on").Run()
-				copyBellInit[sb.Name] = true
-			}
-
 			// Skip when a client was recently attached
 			if t, ok := copyAttachedAt[sb.Name]; ok && time.Since(t) < 4*time.Second {
 				// Carry forward previous data for skipped sandboxes
@@ -538,7 +523,7 @@ func pollStatusCmd(
 				continue
 			}
 
-			// Check if a user is attached
+			// Check if a user is attached to tmux
 			clientOut, _ := exec.Command("docker", "exec", containerName,
 				"tmux", "list-clients", "-t", "main").CombinedOutput()
 			if strings.Contains(string(clientOut), "attached") {
@@ -566,7 +551,7 @@ func pollStatusCmd(
 			prevOutput := copyPreviews[sb.Name]
 			previews[sb.Name] = output
 
-			agentStates[sb.Name] = detectAgentState(containerName, output, prevOutput)
+			agentStates[sb.Name] = detectAgentState(output, prevOutput)
 			diffStats[sb.Name] = fetchDiffStats(sb.Name)
 		}
 
@@ -574,7 +559,6 @@ func pollStatusCmd(
 			previews:    previews,
 			agentStates: agentStates,
 			diffStats:   diffStats,
-			bellInit:    copyBellInit,
 			attachedAt:  copyAttachedAt,
 		}
 	}
@@ -588,7 +572,7 @@ func pollStatusCmd(
 //  2. Output changed since last tick → "working" (agent producing output)
 //  3. Output stable + Claude UI shows idle/prompt patterns → "waiting"
 //  4. Otherwise → "working"
-func detectAgentState(containerName, output, prevOutput string) string {
+func detectAgentState(output, prevOutput string) string {
 	lines := strings.Split(strings.TrimRight(output, "\n"), "\n")
 
 	// Check for shell prompt — agent has exited
@@ -607,16 +591,7 @@ func detectAgentState(containerName, output, prevOutput string) string {
 		return "working"
 	}
 
-	// Output is stable — check tmux bell flag (Claude sends BEL when idle)
-	bellOut, err := exec.Command("docker", "exec", containerName,
-		"tmux", "display-message", "-t", "main", "-p", "#{window_bell_flag}").CombinedOutput()
-	if err == nil && strings.TrimSpace(string(bellOut)) == "1" {
-		return "waiting"
-	}
-
 	// Scan recent lines for Claude Code UI patterns indicating idle/waiting.
-	// This catches cases where the bell was missed (e.g. monitor-bell wasn't
-	// enabled when the bell fired).
 	for i := len(lines) - 1; i >= 0 && i >= len(lines)-15; i-- {
 		trimmed := strings.TrimSpace(lines[i])
 		if trimmed == "" {
