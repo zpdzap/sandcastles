@@ -24,11 +24,26 @@ brew install zpdzap/tap/sandcastles
 go install github.com/zpdzap/sandcastles/cmd/sc@latest
 ```
 
+### Building from Source
+
+```bash
+cd sandcastles
+go install ./cmd/sc/          # installs sc to ~/go/bin/
+
+# claude-chill (required — eliminates tmux flicker)
+# Download the latest release from https://github.com/davidbeesley/claude-chill/releases
+# and place the binary next to sc:
+cp claude-chill ~/go/bin/claude-chill
+```
+
+The `sc` binary looks for `claude-chill` in the same directory as itself and automatically copies it into containers at startup.
+
 ## Prerequisites
 
 - Docker
 - Git
-- Go 1.24+
+- Go 1.24+ (to build from source)
+- [claude-chill](https://github.com/davidbeesley/claude-chill) — PTY proxy that eliminates terminal flicker when Claude Code runs inside tmux (binary must be on PATH next to `sc`)
 
 ## Quick Start
 
@@ -66,7 +81,7 @@ sc
 
 1. **`sc init`** detects your project language and generates `.sandcastles/config.yaml` + a Dockerfile
 2. **`/start`** creates a git worktree, builds a Docker image, starts a container with the worktree mounted at `/workspace`
-3. If a task is provided, Claude Code auto-starts inside the container's tmux session
+3. If a task is provided, Claude Code auto-starts inside the container's tmux session, wrapped in [claude-chill](https://github.com/davidbeesley/claude-chill) to eliminate terminal flicker. The `claude-chill` binary is automatically copied into the container from the same directory as `sc`
 4. **Enter** on a sandbox drops you into the tmux session (detach with `Ctrl-B d`)
 5. Code changes appear in `.sandcastles/worktrees/<name>/` — open it in your IDE
 6. **`/merge`** merges the sandbox's branch into your current branch
@@ -234,9 +249,26 @@ Use these paths instead of absolute host paths.
 
 This way the agent knows to look at `/context/TICKETS.md` instead of `/home/you/workspace/TICKETS.md`.
 
+## Container Environment
+
+Each sandbox container runs as user `sandcastle` (UID/GID matching the host) with passwordless sudo. The environment includes:
+
+- **tmux** session (`main`) for persistent agent sessions — detach with `Ctrl-B d`
+- **claude-chill** wrapping Claude Code to eliminate terminal flicker from rapid screen redraws
+- **Node.js 22** (via NodeSource) and **Claude Code** installed globally
+- **X11 forwarding** — if the host has an X11 display (`:0`), the auth cookie is automatically injected into the container so agents can run headed browsers (e.g. Playwright with `--headed`)
+
+### After a Reboot
+
+Containers survive a host reboot (`docker start sc-<name>` to restart), but tmux sessions and Claude conversations are lost. You'll need to reconnect and re-launch Claude Code manually.
+
 ## Multi-Instance
 
 Multiple `sc` instances in the same project share state via `.sandcastles/state.json`. Sandcastles created in one terminal window appear in all others within a few seconds.
+
+## Acknowledgments
+
+- [claude-chill](https://github.com/davidbeesley/claude-chill) by [David Beesley](https://github.com/davidbeesley) — a Rust PTY proxy that intercepts Claude Code's synchronized screen updates and sends only diffs to the terminal, eliminating the flicker that otherwise occurs when running Claude Code inside tmux. Sandcastles bundles and auto-deploys this binary into every container.
 
 ## License
 
